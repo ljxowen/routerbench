@@ -1,0 +1,23 @@
+# Brings up the two backend units. The frontend runs separately (npm run dev,
+# proxying /api to localhost:8000) or can be added as a third service later.
+services:
+  # routerbench microservice — gRPC only, not exposed to the host. Only the
+  # gateway (on the same compose network) can reach it at routerbench:50051.
+  routerbench:
+    build: ./services/routerbench
+    volumes:
+      # Mount data at runtime instead of baking it into the image.
+      - ./services/routerbench/data:/app/data
+
+  # FastAPI gateway — the only unit exposed to the outside world.
+  gateway:
+    build: ./gateway
+    ports:
+      - "8000:8000"
+    environment:
+      # Reach the microservice by its compose service name.
+      - ROUTERBENCH_GRPC_TARGET=routerbench:50051
+    depends_on:
+      # Note: this only orders startup, not readiness. The gateway's gRPC channel
+      # is lazy, so early requests may 503 until the service finishes loading.
+      - routerbench

@@ -1,65 +1,56 @@
 # RouterBench
 
-### [Paper](https://arxiv.org/abs/2403.12031) | [Dataset](https://huggingface.co/datasets/withmartian/routerbench)
+Monorepo with a gateway + microservice backend and a React frontend.
 
-The code for the paper ROUTERBENCH: A Benchmark for Multi-LLM Routing System
+## Architecture
 
-## Setup process
-1. Create .env file in the root directory. With the following variables:
 ```
-CONNECTION_STRING='your mongodb connection string'
+frontend (React)  ──REST/HTTP──►  gateway (FastAPI)  ──gRPC──►  routerbench (microservice)
+   :3000                              :8000                        :50051 (internal only)
 ```
-if you want to use MongoDB as an embedding cache. 
 
-We use Martian as it provides a unified gateway to access all the models we use. Please visit withmartian.com to create a new account and get started.
+- **gateway/** — thin FastAPI front door. Exposes REST to the browser, forwards
+  everything to the microservice over gRPC. Holds no data or ML deps.
+- **services/routerbench/** — the core microservice. Loads the evaluation data
+  and runs the router logic; exposes a gRPC API only.
+- **proto/** — the shared gRPC contract. Both sides generate their own stubs
+  from `proto/routerbench.proto`.
+- **frontend/** — React + Vite UI (dev server proxies `/api` to the gateway).
 
-2. In root directory, run `pip install -e .` to install the packages.
+## Run locally (3 terminals)
 
-## Running the pipeilne 
-
-The pipeline relies on various command line arguments to specify the configuration. Alternatively, you can specify the 
-configuration in a yaml file and pass it to the command line. Example configurations are in the `configs/` directory.
-
-First, if desired, make sure there is a MongoDB instance running that you can connect to. If there is not one, ensure that `local_cache: true` to ensure that 
-the code only uses local files for caching.
-
-Second, run `convert_data.py --config=configs/convert_data.yaml` to process the different data formats into a common format.
-    This script can take raw format from `martian-evals` repo, as well as other relevant input formats.
-
-Third, run `evaluate_routers.py --config=configs/evaluate_routers.yaml` to use the processed data to evaluate different routers. It generates a csv file (long format) with the results of the evaluation, and creates an EvaluationCollection containing the results.
-
-Fourth, run `visualize_results.py --config=configs/visualize.yaml` uses the EvaluationCollection to visualize the results in a performance-vs-cost plot.
-
-For these configurations, the paths to the data files will need to be updated to use your local paths. Example files to recreate results from the paper are available on [Hugging Face](https://huggingface.co/datasets/withmartian/routerbench).
-
-
-## Contribution Guide
-
-The code is designed to be easily extended. To add a new router, or convertor for a different input data format, simply look
-at the abstract classes `AbstractRouter` and `AbstractConvertor` in `routers/` and `convertors/` respectively.
-
-- For each PR, please run flake8, black, isort
 ```bash
-flake8 $(git ls-files '*.py')
-black $(git ls-files '*.py')
-isort $(git ls-files '*.py')
-```
-`$(git ls-files '*.py')` is for running only the files tracked by git, so exclude virtual env files or data files.
-You may need to run `pip install flake8 black isort` if you don't have them installed.
+# 1. microservice (gRPC, :50051)
+cd services/routerbench && python -m grpc_api.server
 
-## Modal update Guide
-To deploy the updated modal app, run the following commands:
+# 2. gateway (REST, :8000)
+cd gateway && uvicorn gateway.main:app --port 8000
+
+# 3. frontend (:3000)
+cd frontend && npm run dev
+```
+
+## Run with Docker (backend only)
+
 ```bash
-modal deploy modal_router.py
+docker compose up --build
 ```
 
-## Citation
-If you use this code, please cite the following paper:
-```bibtex
-@article{hu2024routerbench,
-  title   = {ROUTERBENCH: A Benchmark for Multi-LLM Routing System},
-  author  = {Qitian Jason Hu and Jacob Bieker and Xiuyu Li and Nan Jiang and Benjamin Keigwin and Gaurav Ranganath and Kurt Keutzer and Shriyash Kaustubh Upadhyay},
-  year    = {2024},
-  journal = {arXiv preprint arXiv: 2403.12031}
-}
+The gateway is published on `:8000`; run the frontend separately with
+`npm run dev`.
+
+## Regenerating gRPC code after editing proto/routerbench.proto
+
+```bash
+# gateway copy
+cd gateway && python -m grpc_tools.protoc -I ../proto \
+  --python_out=gateway/_proto --grpc_python_out=gateway/_proto ../proto/routerbench.proto
+# then fix the import in gateway/_proto/routerbench_pb2_grpc.py:
+#   import routerbench_pb2  ->  from gateway._proto import routerbench_pb2
+
+# microservice copy
+cd services/routerbench && python -m grpc_tools.protoc -I ../../proto \
+  --python_out=grpc_api --grpc_python_out=grpc_api ../../proto/routerbench.proto
+# then fix the import in grpc_api/routerbench_pb2_grpc.py:
+#   import routerbench_pb2  ->  from grpc_api import routerbench_pb2
 ```

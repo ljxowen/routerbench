@@ -29,7 +29,7 @@ from utils import (WILLINGNESS_TO_PAY, build_train_eval_dataset,
 warnings.simplefilter("ignore")
 dotenv.load_dotenv()
 
-EMBEDDING_CONNECTION_STRING = os.environ["CONNECTION_STRING"]
+EMBEDDING_CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
 
 
 def run_modal_results(model_params, dataset_df, willingness_to_pay):

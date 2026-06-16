@@ -253,6 +253,27 @@ class EvaluationResultCollection:
         :param router_names: List of router names to plot, router name is the base name of the router, e.g. mlp, knn, etc. plus the parameters
             E.g. knn|neighbors:10.0|metric:cosine|fraction:0.1|embedding:all-MiniLM-L12-v2
         """
+        router_data_best, llm_data = self._select_router_data(
+            eval_name, models_to_route=models_to_route, router_names=router_names
+        )
+        # Plotting routing model data
+        self._plot_router_result(
+            router_data_best, llm_data, eval_name, save_file_path, show_plot, plot_ndch
+        )
+
+    def _select_router_data(
+        self,
+        eval_name: Optional[str] = None,
+        models_to_route: list[str] = (" ",),
+        router_names=None,
+    ):
+        """Shared selection behind both the matplotlib chart and the chart API.
+
+        For each router type, picks the single best variant (cascading uses
+        error_rate 0.2, svm is dropped) and returns ``(router_data_best,
+        llm_data)``. Kept as one method so ``plot_performance_vs_cost`` and
+        ``get_chart_data`` draw from an identical source and can never drift.
+        """
         router_data = []
         llm_data = []
         for evaluation_result in self.evaluation_results:
@@ -312,11 +333,115 @@ class EvaluationResultCollection:
                 best_name = [new_best_names]
             if "svm" not in best_name[0]:
                 router_data_best.append({best_name[0]: router_results[best_name[0]]})
+        return router_data_best, llm_data
 
-        # Plotting routing model data
-        self._plot_router_result(
-            router_data_best, llm_data, eval_name, save_file_path, show_plot, plot_ndch
+    def get_chart_data(
+        self,
+        eval_name: Optional[str] = None,
+        models_to_route: list[str] = (" ",),
+        plot_ndch: bool = True,
+    ) -> dict:
+        """Return the exact series ``plot_performance_vs_cost`` draws, as plain
+        JSON-serializable data, so an API can serve a chart identical to the
+        matplotlib output.
+
+        Mirrors the geometry in ``_plot_router_result`` (same sort/dedup, same
+        display names, same ``get_non_descreasing_convex_hull_of``) but emits
+        each series once instead of redrawing the LLM points per router.
+        """
+        router_data_best, llm_data = self._select_router_data(
+            eval_name, models_to_route=models_to_route
         )
+
+        routers = []
+        for router_results in router_data_best:
+            for router_variant, variant_results in router_results.items():
+                x_coords, y_coords = [], []
+                for willingness_to_pay_value in sorted(variant_results):
+                    point = variant_results[willingness_to_pay_value]
+                    x_coords.append(point["total_cost"])
+                    y_coords.append(point["performance"])
+                # Remove duplicates (same ordering as _plot_router_result)
+                x_coords, y_coords = zip(*sorted(set(zip(x_coords, y_coords))))
+
+                router_name_display = router_variant.split("|")[0]
+                if "mlp" in router_name_display or "knn" in router_name_display:
+                    router_name_display = router_name_display.upper()
+                else:
+                    router_name_display = "Cascading"
+                if "cascading router" in router_name_display:
+                    error_rate = router_variant.split("|")[-2].split(":")[-1]
+                    full_display_name = f"cascading router error: {error_rate}"
+                else:
+                    full_display_name = f"{router_name_display} router"
+
+                points = [
+                    {"total_cost": float(x), "performance": float(y)}
+                    for x, y in zip(x_coords, y_coords)
+                ]
+                ndch = []
+                if plot_ndch:
+                    try:
+                        ndch_points = get_non_descreasing_convex_hull_of(
+                            np.stack((np.array(x_coords), np.array(y_coords)), axis=-1)
+                        )
+                        ndch = [
+                            {"total_cost": float(x), "performance": float(y)}
+                            for x, y in ndch_points
+                        ]
+                    except Exception:
+                        # Matches the plot's fallback: use the raw curve as the NDCH
+                        ndch = list(points)
+
+                routers.append(
+                    {
+                        "name": full_display_name,
+                        "display": router_name_display,
+                        "points": points,
+                        "ndch": ndch,
+                    }
+                )
+
+        llms = []
+        oracle = None
+        llm_xs, llm_ys = [], []
+        for model_name, values in llm_data.items():
+            cost, performance = float(values[0]), float(values[1])
+            if model_name == "oracle":
+                oracle = {"total_cost": cost, "performance": performance}
+                continue
+            llms.append(
+                {
+                    "model_name": model_name,
+                    "display": MODELS_TO_ROUTE_NAMES.get(model_name, model_name),
+                    "total_cost": cost,
+                    "performance": performance,
+                }
+            )
+            llm_xs.append(cost)
+            llm_ys.append(performance)
+
+        # Zero router = the non-decreasing convex hull of the LLM points.
+        zero_router_ndch = []
+        if llm_xs:
+            try:
+                ndch_points = get_non_descreasing_convex_hull_of(
+                    np.stack((np.array(llm_xs), np.array(llm_ys)), axis=-1)
+                )
+                zero_router_ndch = [
+                    {"total_cost": float(x), "performance": float(y)}
+                    for x, y in ndch_points
+                ]
+            except Exception:
+                zero_router_ndch = []
+
+        return {
+            "eval_name": eval_name,
+            "routers": routers,
+            "llms": llms,
+            "oracle": oracle,
+            "zero_router_ndch": zero_router_ndch,
+        }
 
     def _plot_router_result(
         self,
@@ -436,16 +561,26 @@ class EvaluationResultCollection:
             )
         else:
             plt.title("Cost vs. Performance for Routers and LLMs\neval: all")
-        plt.legend(loc="upper left", bbox_to_anchor=(1, 1))
-        plt.tight_layout()
+        # Lay the legend out below the plot in several columns, so a long legend
+        # no longer eats the axes' width and squashes the figure.
         plt.grid(True)
+        plt.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.12),
+            ncol=5,
+            fontsize="small",
+            frameon=False,
+        )
+        plt.tight_layout()
         if save_file_path:
             assert isinstance(
                 save_file_path, str
             ), "save_file_path must be a string if not False"
             eval_name_in_path = eval_name if eval_name is not None else "all"
             graph_name = f"all_routers_{generate_datetime_str()}_{eval_name_in_path}_{plot_ndch}_performance_vs_cost.png"
-            plt.savefig(os.path.join(save_file_path, graph_name))
+            plt.savefig(
+                os.path.join(save_file_path, graph_name), bbox_inches="tight"
+            )
         if show_plot:
             plt.show()
         else:

@@ -167,3 +167,11 @@ pip.conf
 *.png
 run_scripts.sh
 gcs_credentials_old.json
+
+# Node / frontend
+node_modules/
+.vite/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

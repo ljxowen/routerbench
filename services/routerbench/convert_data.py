@@ -17,7 +17,7 @@ tqdm_auto.pandas()
 warnings.simplefilter("ignore")
 dotenv.load_dotenv()
 
-EMBEDDING_CONNECTION_STRING = os.environ["CONNECTION_STRING"]
+EMBEDDING_CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
 
 
 if __name__ == "__main__":

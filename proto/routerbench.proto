@@ -1,0 +1,115 @@
+// Protocol Buffers definition for the RouterBench gRPC API.
+//
+// This .proto file is the single source of truth for the gRPC interface: it
+// declares the service (the callable RPC methods) and the messages (the typed
+// request/response payloads). Running grpc_tools.protoc on this file generates
+// two Python modules:
+//   - routerbench_pb2.py       -> the message classes (Row, ResultsResponse, ...)
+//   - routerbench_pb2_grpc.py  -> the server base class and client stub
+// Clients in any language can generate their own bindings from this same file.
+
+// proto3 is the current Protobuf syntax. A notable rule: scalar fields have no
+// "presence" — an unset string is "" and an unset number is 0, not null. We rely
+// on this below (empty eval_name == "all", empty model_name on router rows).
+syntax = "proto3";
+
+// Logical namespace for the generated types; keeps names from colliding with
+// other proto packages when bundled into a larger system.
+package routerbench;
+
+// A service is a collection of RPC methods the server exposes. Each rpc names a
+// single request message type and a single response message type. This service
+// mirrors the REST API: the same two read-only operations, the same data shape.
+service RouterBench {
+  // Returns all available benchmark names. Takes an empty request because there
+  // are no parameters — we still need a message type (proto has no "void").
+  rpc GetEvalNames(EvalNamesRequest) returns (EvalNamesResponse);
+
+  // Returns result rows, optionally filtered to a single benchmark.
+  rpc GetResults(ResultsRequest) returns (ResultsResponse);
+
+  // Returns chart series for one benchmark, computed by the SAME selection +
+  // NDCH logic the matplotlib visualizer uses (see EvaluationResultCollection.
+  // get_chart_data), so the frontend chart matches the offline plot exactly.
+  rpc GetChartData(ChartRequest) returns (ChartResponse);
+}
+
+// Empty request: a placeholder type so GetEvalNames has a well-defined signature
+// and can be extended later (adding fields stays backward compatible).
+message EvalNamesRequest {}
+
+message EvalNamesResponse {
+  // `repeated` means a list/array. The `= 1` is the field's wire tag (its
+  // identity in the binary encoding), not a default value — tags must stay
+  // stable across versions, so never renumber an existing field.
+  repeated string eval_names = 1;
+}
+
+message ResultsRequest {
+  // Optional benchmark filter. Because proto3 strings default to "", an unset
+  // value naturally means "all benchmarks" — see GetResults in service.py.
+  string eval_name = 1;
+}
+
+// One result row, covering both router rows and LLM rows in a single type.
+// Fields irrelevant to a given row type are simply left at their default value:
+//   - router rows: model_name is "" (empty), params is populated.
+//   - llm rows:    params is empty,         model_name is populated.
+// (A proto3 `oneof` could model this more strictly, but a flat message keeps the
+// client code simple and matches the dict shape returned by data_result.)
+message Row {
+  string type = 1;          // "router" or "llm"
+  string router_type = 2;   // e.g. "mlp", "knn", or "llm"
+  string eval_name = 3;
+  double performance = 4;   // accuracy in [0, 1]
+  double total_cost = 5;    // total cost in USD
+  string model_name = 6;            // llm rows only
+  map<string, string> params = 7;   // router rows only (hyperparameters)
+}
+
+message ResultsResponse {
+  repeated Row rows = 1;
+}
+
+// ---- Chart data (mirrors EvaluationResultCollection.get_chart_data) ----
+
+message ChartRequest {
+  // Required benchmark to chart. Unlike GetResults there is no "all" mode — a
+  // performance-vs-cost chart is per benchmark.
+  string eval_name = 1;
+}
+
+// A single (cost, performance) coordinate, reused for router curves, NDCH
+// hulls, LLM baselines and the oracle point.
+message ChartPoint {
+  double total_cost = 1;
+  double performance = 2;
+}
+
+// One router curve: the willingness-to-pay sweep of the selected best variant,
+// plus its non-decreasing convex hull (the frontier line).
+message ChartRouter {
+  string name = 1;                    // legend name, e.g. "MLP router"
+  string display = 2;                 // short label, e.g. "MLP"
+  repeated ChartPoint points = 3;     // the swept operating points
+  repeated ChartPoint ndch = 4;       // convex-hull frontier (may be empty)
+}
+
+// One LLM baseline scatter point.
+message ChartLLM {
+  string model_name = 1;
+  string display = 2;
+  double total_cost = 3;
+  double performance = 4;
+}
+
+message ChartResponse {
+  string eval_name = 1;
+  repeated ChartRouter routers = 2;
+  repeated ChartLLM llms = 3;
+  // Oracle point; singular message field, so absence is detectable via
+  // HasField("oracle") when no model answered any prompt correctly.
+  ChartPoint oracle = 4;
+  // "Zero router" frontier: the convex hull of the LLM baseline points.
+  repeated ChartPoint zero_router_ndch = 5;
+}
