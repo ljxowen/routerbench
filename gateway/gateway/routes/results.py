@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 
 from gateway.deps import get_stub
-from gateway._proto import routerbench_pb2 as pb
+from gateway._proto.routerbench.v1 import routerbench_pb2 as pb
 
 # prefix="/api" gives every route in this file the /api prefix; tags group it in docs.
 router = APIRouter(prefix="/api", tags=["results"])

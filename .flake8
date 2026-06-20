@@ -1,0 +1,9 @@
+[flake8]
+# Align flake8 with black (the formatter run by `make format`).
+max-line-length = 88
+# black-compatible ignores: E203 (whitespace before ':') and W503 (line break
+# before binary operator) are styles black intentionally produces, so flake8
+# must not fight them. See black's docs on flake8 configuration.
+extend-ignore = E203, W503
+# Generated protobuf stubs are machine-written; don't lint them.
+extend-exclude = .venv,*_pb2.py,*_pb2_grpc.py

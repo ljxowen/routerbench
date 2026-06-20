@@ -10,7 +10,8 @@ keeps its own copy so it stays independent of the service's codebase.
 import grpc
 
 from gateway.config import GRPC_TARGET
-from gateway._proto import routerbench_pb2_grpc as pb_grpc
+from gateway.observability import ClientMetricsInterceptor
+from gateway._proto.routerbench.v1 import routerbench_pb2_grpc as pb_grpc
 
 
 class GrpcClient:
@@ -21,7 +22,10 @@ class GrpcClient:
     def connect(self) -> None:
         # insecure_channel is lazy: it doesn't block waiting for the service,
         # the actual connection happens on the first RPC call.
-        self._channel = grpc.insecure_channel(GRPC_TARGET)
+        channel = grpc.insecure_channel(GRPC_TARGET)
+        # Wrap the channel so every RPC made through the stub is measured for
+        # Prometheus (started/handled counts + latency histogram).
+        self._channel = grpc.intercept_channel(channel, ClientMetricsInterceptor())
         self.stub = pb_grpc.RouterBenchStub(self._channel)
 
     def close(self) -> None:

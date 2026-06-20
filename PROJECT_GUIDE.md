@@ -2,7 +2,7 @@
 
 > Auxiliary documentation for fast onboarding (humans or AI assistants). Read this
 > first to understand the architecture, the data flow, and where each piece lives.
-> Last reviewed: 2026-06-18.
+> Last reviewed: 2026-06-19.
 
 ## 1. What this project is
 
@@ -27,18 +27,21 @@ serves it. All the heavy ML work happens offline in the research pipeline.
 
 ```
 frontend (React/Vite)  ──REST/HTTP──►  gateway (FastAPI)  ──gRPC──►  routerbench service
-   :3000                                  :8000                        :50051 (internal only)
-   tables + charts                        thin forwarder               owns data + ML logic
+   :3000                                  :8000  /metrics             :50051 (internal only)
+   tables + charts                        thin forwarder               /metrics :9090
+                                                                       + gRPC health protocol
 ```
 
 - **`frontend/`** — React + Vite SPA. Dev server proxies `/api/*` → gateway:8000.
 - **`gateway/`** — Thin FastAPI front door. Holds **no data and no ML deps**. Converts
-  REST ⇄ gRPC and nothing else.
+  REST ⇄ gRPC and nothing else. Instrumented (metrics/tracing) — see §6.
 - **`services/routerbench/`** — The core microservice. Loads the results pickle into
   memory at startup and exposes a **gRPC-only** API. Also contains the entire offline
   research pipeline (router training, evaluation, plotting).
-- **`proto/routerbench.proto`** — The shared gRPC contract (single source of truth).
-  Both gateway and service generate their own Python stubs from it.
+- **`proto/routerbench/v1/routerbench.proto`** — The shared, **versioned** gRPC contract
+  (single source of truth; package `routerbench.v1`). Both gateway and service generate
+  their own Python stubs from it; [buf](https://buf.build) lints it and blocks breaking
+  changes (`proto/buf.yaml`).
 
 Why the split: the gateway is small and safe to expose publicly; the service carries
 the large ML stack (pandas/sklearn/sentence-transformers) and the data, and stays
@@ -51,8 +54,13 @@ routerbench/
 ├── README.md                  # short top-level readme (architecture + run commands)
 ├── PROJECT_GUIDE.md           # ← this file
 ├── docker-compose.yml         # brings up gateway + service (NOT the frontend)
-├── proto/routerbench.proto    # gRPC contract (3 RPCs, see §5)
-├── scripts/gen_proto.sh       # regenerate gRPC stubs from the proto
+├── Makefile                   # deps (pip-compile) + proto (gen/lint/breaking) targets
+├── proto/
+│   ├── routerbench/v1/routerbench.proto  # versioned gRPC contract (3 RPCs, see §5)
+│   └── buf.yaml               # buf lint + breaking-change rules
+├── scripts/
+│   ├── gen_proto.sh           # regenerate gRPC stubs from the proto (both sides)
+│   └── fix_proto_imports.py   # rewrite protoc imports to relative (replaces a perl hack)
 │
 ├── frontend/                  # React + Vite SPA (TypeScript)
 │   ├── vite.config.ts         # port 3000, proxies /api → localhost:8000
@@ -64,26 +72,30 @@ routerbench/
 │
 ├── gateway/                   # FastAPI gateway
 │   ├── Dockerfile             # python:3.11-slim, no ML deps
-│   ├── requirements.txt
+│   ├── pyproject.toml         # direct deps (abstract) + [dev] extra
+│   ├── requirements.txt       # pip-compile lock (runtime); requirements-dev.txt = + dev
 │   └── gateway/
-│       ├── main.py            # app + lifespan (opens gRPC channel) + CORS
-│       ├── config.py          # GRPC_TARGET (env: ROUTERBENCH_GRPC_TARGET), CORS
-│       ├── grpc_client.py     # single long-lived gRPC channel/stub
+│       ├── main.py            # app + lifespan (gRPC channel) + CORS + /metrics + tracing
+│       ├── config.py          # GRPC_TARGET, CORS, SERVICE_NAME, TRACING_ENABLED
+│       ├── grpc_client.py     # single long-lived gRPC channel/stub (+ metrics interceptor)
+│       ├── observability.py   # client metrics interceptor + OTel tracing setup
 │       ├── deps.py            # get_stub() FastAPI dependency
 │       ├── router.py          # aggregates the routes/ modules
 │       ├── routes/            # evals.py, results.py, chart.py (one file per endpoint)
-│       └── _proto/            # gateway's generated stubs (its own copy)
+│       └── _proto/routerbench/v1/  # gateway's generated stubs (isolated, versioned)
 │
 └── services/routerbench/      # the microservice + research code
     ├── Dockerfile             # python:3.11-slim + build-essential (full ML stack)
-    ├── setup.py               # `pip install -e .` installs the `routerbench` package
-    ├── requirements.txt
+    ├── pyproject.toml         # `pip install -e .` installs `routerbench`; direct deps + [dev] extra
+    ├── requirements.txt       # pip-compile lock (runtime); requirements-dev.txt = + dev tools
     ├── grpc_api/              # the gRPC SERVER (the web-facing part of the service)
-    │   ├── server.py          # entry point: `python -m grpc_api.server`
+    │   ├── server.py          # entry point: interceptors + health + metrics + graceful stop
     │   ├── service.py         # servicer: implements the 3 RPCs, dict⇄protobuf glue
+    │   ├── observability.py   # metrics + logging interceptors, OTel tracing setup
+    │   ├── health_probe.py    # CLI gRPC health check (`python -m grpc_api.health_probe`)
     │   ├── state.py           # AppState: loads the results pickle once at startup
-    │   ├── config.py          # PKL_PATH (which results file to serve), GRPC_PORT
-    │   └── routerbench_pb2*.py # the service's generated stubs (its own copy)
+    │   ├── config.py          # PKL_PATH, GRPC_PORT, METRICS_PORT, grace, tracing flags
+    │   └── _proto/routerbench/v1/  # the service's generated stubs (isolated, versioned)
     │
     ├── data_result.py         # turns the results collection into flat API rows
     ├── evaluation/
@@ -110,7 +122,7 @@ routerbench/
     ├── visualize_results.py   # pipeline step 3 (matplotlib performance-vs-cost plot)
     ├── modal_router.py        # Modal deployment wrapper for cloud runs
     ├── configs/               # example YAML configs for each pipeline step
-    └── data/                  # data + results (mostly gitignored — see §8)
+    └── data/                  # data + results (mostly gitignored — see §9)
         ├── routerbench/       # input pickle + the served results pickle
         ├── eval_results/      # per-benchmark CSV results
         └── analysis_results/  # generated plots
@@ -162,9 +174,10 @@ Three steps, each driven by a YAML config in `configs/`:
 Setup: `pip install -e .` from `services/routerbench/`. Optionally a `.env` with
 `CONNECTION_STRING=<mongodb uri>` for the embedding cache (else use `local_cache: true`).
 
-## 5. The gRPC contract (`proto/routerbench.proto`)
+## 5. The gRPC contract (`proto/routerbench/v1/routerbench.proto`)
 
-Three read-only RPCs. Each has a 1:1 REST endpoint on the gateway:
+Three read-only RPCs in the versioned package `routerbench.v1` (wire service name
+`routerbench.v1.RouterBench`). Each has a 1:1 REST endpoint on the gateway:
 
 | RPC | REST endpoint | Returns |
 |-----|---------------|---------|
@@ -181,14 +194,67 @@ series (`ChartResponse`) carries router curves + their NDCH (convex-hull frontie
 LLM scatter points, an optional `oracle` point, and the `zero_router_ndch` (the hull
 of the LLM points = "what you'd get routing randomly/statically").
 
+### Versioning & evolving the contract
+
+The `.v1` suffix is deliberate: a backward-**compatible** change (adding a field or
+RPC) stays in `v1`; a **breaking** change (renumbering/removing a field, changing a
+signature) ships as a new `routerbench.v2` package beside this one, so existing
+clients keep working. `make proto-breaking` (buf) enforces this in CI by diffing the
+proto against `main`.
+
 ### Regenerating stubs after editing the proto
 
-Both sides keep their **own** copy of the generated code. After editing the proto,
-regenerate both (see commands in [README.md](README.md) or
-[scripts/gen_proto.sh](scripts/gen_proto.sh)) and fix the relative import in each
-`*_pb2_grpc.py` (`import routerbench_pb2` → package-qualified import).
+Both sides keep their **own** copy of the generated code, isolated in a versioned
+subpackage (`_proto/routerbench/v1/`). After editing the proto, regenerate both with:
 
-## 6. Frontend tabs
+```bash
+make proto          # or: bash scripts/gen_proto.sh
+```
+
+The script generates with `-I proto` (so imports are package-qualified) and then runs
+[scripts/fix_proto_imports.py](scripts/fix_proto_imports.py) to rewrite protoc's
+cross-file imports to **relative** imports — making each generated tree self-contained
+and location-independent (no `sys.path` assumptions, no manual import fixups). Lint
+the schema with `make proto-lint` before committing.
+
+## 6. Observability, health & operations
+
+Both backends ship with production cross-cutting concerns. The mechanism is gRPC
+**interceptors** (the gRPC equivalent of HTTP middleware), so the business code in
+`service.py` / the routes stays untouched.
+
+- **Metrics (Prometheus)** — scraped over plain HTTP:
+  - service: a dedicated port, `:9090/metrics` (`METRICS_PORT`).
+  - gateway: mounted on the API port, `:8000/metrics`.
+  - Metric names follow the go-grpc-prometheus convention (`grpc_server_*` /
+    `grpc_client_*`, labelled `grpc_service` / `grpc_method` / `grpc_code`), so
+    standard Grafana dashboards work as-is. Server metrics carry the accurate status
+    code even for `context.abort()` (a context proxy captures it — see
+    `_CodeCaptureContext` in [observability.py](services/routerbench/grpc_api/observability.py)).
+- **Structured logging** — one line per RPC (method, code, latency, peer), INFO on
+  success / WARNING on failure.
+- **Tracing (OpenTelemetry)** — **optional**, off by default so the base image runs
+  without the OTel packages. Enable with `ROUTERBENCH_TRACING_ENABLED=1` (service) /
+  `GATEWAY_TRACING_ENABLED=1` (gateway) plus `pip install '.[observability]'` and an
+  `OTEL_EXPORTER_OTLP_ENDPOINT`. Trace context propagates over gRPC metadata, so an
+  HTTP request → gateway → service shows up as one end-to-end trace.
+- **Health protocol** — the service implements the standard `grpc.health.v1.Health`
+  service and only reports `SERVING` once the pickle is loaded. [health_probe.py](services/routerbench/grpc_api/health_probe.py)
+  (`python -m grpc_api.health_probe`) wraps it for container/k8s probes; the
+  docker-compose `healthcheck` uses it, and the gateway's `depends_on:
+  service_healthy` gates startup on it — **this is what fixes the old 503 race**.
+- **Graceful shutdown** — on SIGTERM/SIGINT the service flips health to `NOT_SERVING`
+  (so LBs drain it) then `server.stop(grace=…)`, letting in-flight RPCs finish.
+
+Config knobs (all env-overridable) live in
+[grpc_api/config.py](services/routerbench/grpc_api/config.py) and
+[gateway/config.py](gateway/gateway/config.py).
+
+**Not yet done (P1, deferred):** client channel options (keepalive/retry/max message
+size), per-call deadlines, servicer error→status-code mapping, and TLS. These are
+runtime-robustness concerns, orthogonal to the interface work above.
+
+## 7. Frontend tabs
 
 [App.tsx](frontend/src/App.tsx) fetches eval names + all results once, then renders
 one of five tabs (all in `frontend/src/components/`):
@@ -202,7 +268,7 @@ one of five tabs (all in `frontend/src/components/`):
 
 API types and fetch wrappers live in [api/client.ts](frontend/src/api/client.ts).
 
-## 7. Core domain concepts (for reading the ML code)
+## 8. Core domain concepts (for reading the ML code)
 
 - **Router types**: `knn`, `mlp`, `svm`, `cascading router`. Each has its own
   hyperparameters, declared in `model_metric_dict` in
@@ -223,7 +289,7 @@ API types and fetch wrappers live in [api/client.ts](frontend/src/api/client.ts)
   [routers/common.py](services/routerbench/routers/common.py) — per-token USD prices
   per model; cost helpers live in `routers/abstract_router.py`.
 
-## 8. Data files & gitignore
+## 9. Data files & gitignore
 
 The `data/` directory is **mostly gitignored** (large pickles/datasets are not in git).
 What's committed: `.gitkeep` placeholders, the YAML config snapshots, and the
@@ -237,28 +303,34 @@ explicitly excluded (commit `b8539f5`: "exclude dataset from git").
 `grpc_api.state.AppState.load()` will fail if the pickle at `PKL_PATH` is missing.
 Get that file in place first (or point `PKL_PATH` at one you have).
 
-## 9. State of the project (as of last review)
+## 10. State of the project (as of last review)
 
 - **Research code**: mature — the original published paper code (kNN/MLP/SVM/cascading
   routers, convertors, Modal deployment, matplotlib visualization). Stable.
-- **Web app**: newer, added in the most recent commit (`b8539f5`). The 3-tier
-  gateway + service + frontend stack is wired and working; the gRPC contract is
-  settled at 3 read-only RPCs. All read-only (CORS allows GET only).
+- **Web app**: the 3-tier gateway + service + frontend stack is wired and working;
+  the gRPC contract is settled at 3 read-only RPCs in a versioned `routerbench.v1`
+  package. All read-only (CORS allows GET only).
+- **Production hardening**: the gRPC layer has been brought toward industrial
+  standard — Prometheus metrics, structured logging, optional OTel tracing, the
+  standard health protocol, and graceful shutdown (§6); plus a versioned proto,
+  isolated generated stubs, relative-import codegen, and buf governance (§5).
 - **Known rough edges**:
-  - `docker-compose` `depends_on` only orders startup, not readiness — early requests
-    may 503 while the service loads the pickle (the gRPC channel is lazy).
   - The frontend is not containerized; run it with `npm run dev` separately.
-  - Stubs are duplicated (one copy per side) and must be regenerated by hand after
-    proto changes — there's no automated codegen in CI.
+  - Stubs are duplicated (one copy per side) and regenerated via `make proto` (no
+    hand-fixing of imports anymore) — but there's no automated codegen check in CI yet.
+  - **P1 not yet done**: gRPC channel options (keepalive/retry/max message size),
+    per-call deadlines, servicer error→status-code mapping, and TLS (§6).
   - `.venv/` is committed to the working tree (Python 3.11) but is environment-specific.
 
-## 10. Quick "where do I…" index
+## 11. Quick "where do I…" index
 
 | I want to… | Go to |
 |------------|-------|
 | Add/change a REST endpoint | `gateway/gateway/routes/` + `router.py`, then mirror in proto + `grpc_api/service.py` |
 | Change which results file is served | `services/routerbench/grpc_api/config.py` (`PKL_PATH`) |
-| Change the gRPC contract | `proto/routerbench.proto` → regen both stubs → update both sides |
+| Change the gRPC contract | edit `proto/routerbench/v1/routerbench.proto` → `make proto` → `make proto-lint` |
+| Add/change a gRPC metric or interceptor | `grpc_api/observability.py` (server) / `gateway/observability.py` (client) |
+| Tune ports/grace/tracing | `grpc_api/config.py`, `gateway/config.py` (env-overridable) |
 | Add a new router algorithm | subclass `AbstractRouter` in `routers/`, wire into `evaluate_routers.py` |
 | Add a new input data format | subclass `AbstractConvertor` in `convertors/` |
 | Change chart/selection logic | `evaluation/eval.py` (`_select_router_data`, `get_chart_data`) |

@@ -5,9 +5,20 @@ services:
   # gateway (on the same compose network) can reach it at routerbench:50051.
   routerbench:
     build: ./services/routerbench
+    ports:
+      # Prometheus metrics, scrapeable from the host. gRPC (50051) stays internal.
+      - "9090:9090"
     volumes:
       # Mount data at runtime instead of baking it into the image.
       - ./services/routerbench/data:/app/data
+    healthcheck:
+      # Uses the standard gRPC health protocol via the bundled probe. Reports
+      # healthy only once the .pkl data is loaded and the server flips to SERVING.
+      test: ["CMD", "python", "-m", "grpc_api.health_probe"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # FastAPI gateway — the only unit exposed to the outside world.
   gateway:
@@ -18,6 +29,8 @@ services:
       # Reach the microservice by its compose service name.
       - ROUTERBENCH_GRPC_TARGET=routerbench:50051
     depends_on:
-      # Note: this only orders startup, not readiness. The gateway's gRPC channel
-      # is lazy, so early requests may 503 until the service finishes loading.
-      - routerbench
+      routerbench:
+        # Wait for the healthcheck to pass, not just for the container to start,
+        # so the gateway never sends RPCs before the service is ready (no more
+        # startup-race 503s).
+        condition: service_healthy

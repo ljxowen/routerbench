@@ -15,8 +15,8 @@ keeping the microservice independent of the gateway.
 """
 from data_result import get_table_data
 from grpc_api.state import AppState
-from grpc_api import routerbench_pb2 as pb
-from grpc_api import routerbench_pb2_grpc as pb_grpc
+from grpc_api._proto.routerbench.v1 import routerbench_pb2 as pb
+from grpc_api._proto.routerbench.v1 import routerbench_pb2_grpc as pb_grpc
 
 
 class RouterBenchServicer(pb_grpc.RouterBenchServicer):

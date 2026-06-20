@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # volume at runtime instead, to keep the image small.
 COPY . .
 
-EXPOSE 50051
+# 50051: gRPC API. 9090: Prometheus metrics (HTTP /metrics).
+EXPOSE 50051 9090
 
 CMD ["python", "-m", "grpc_api.server"]

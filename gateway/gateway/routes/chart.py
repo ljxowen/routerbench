@@ -6,7 +6,7 @@ the offline matplotlib visualizer, so the frontend chart matches that plot.
 from fastapi import APIRouter, Depends, Query
 
 from gateway.deps import get_stub
-from gateway._proto import routerbench_pb2 as pb
+from gateway._proto.routerbench.v1 import routerbench_pb2 as pb
 
 router = APIRouter(prefix="/api", tags=["chart"])
 

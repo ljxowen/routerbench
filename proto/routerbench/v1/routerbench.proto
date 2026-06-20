@@ -14,8 +14,12 @@
 syntax = "proto3";
 
 // Logical namespace for the generated types; keeps names from colliding with
-// other proto packages when bundled into a larger system.
-package routerbench;
+// other proto packages when bundled into a larger system. The trailing `.v1` is
+// an API version: the wire service name becomes routerbench.v1.RouterBench, and
+// the file lives at proto/routerbench/v1/. A breaking change (renumbering or
+// removing a field, changing a signature) ships as a new `v2` package alongside
+// this one, so existing clients keep working — see buf.yaml's breaking rules.
+package routerbench.v1;
 
 // A service is a collection of RPC methods the server exposes. Each rpc names a
 // single request message type and a single response message type. This service

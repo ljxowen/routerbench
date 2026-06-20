@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-from gateway._proto import routerbench_pb2 as routerbench__pb2
+from . import routerbench_pb2 as routerbench_dot_v1_dot_routerbench__pb2
 
 
 class RouterBenchStub(object):
@@ -18,19 +18,19 @@ class RouterBenchStub(object):
             channel: A grpc.Channel.
         """
         self.GetEvalNames = channel.unary_unary(
-                '/routerbench.RouterBench/GetEvalNames',
-                request_serializer=routerbench__pb2.EvalNamesRequest.SerializeToString,
-                response_deserializer=routerbench__pb2.EvalNamesResponse.FromString,
+                '/routerbench.v1.RouterBench/GetEvalNames',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.EvalNamesRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.EvalNamesResponse.FromString,
                 )
         self.GetResults = channel.unary_unary(
-                '/routerbench.RouterBench/GetResults',
-                request_serializer=routerbench__pb2.ResultsRequest.SerializeToString,
-                response_deserializer=routerbench__pb2.ResultsResponse.FromString,
+                '/routerbench.v1.RouterBench/GetResults',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.ResultsRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ResultsResponse.FromString,
                 )
         self.GetChartData = channel.unary_unary(
-                '/routerbench.RouterBench/GetChartData',
-                request_serializer=routerbench__pb2.ChartRequest.SerializeToString,
-                response_deserializer=routerbench__pb2.ChartResponse.FromString,
+                '/routerbench.v1.RouterBench/GetChartData',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.ChartRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ChartResponse.FromString,
                 )
 
 
@@ -69,22 +69,22 @@ def add_RouterBenchServicer_to_server(servicer, server):
     rpc_method_handlers = {
             'GetEvalNames': grpc.unary_unary_rpc_method_handler(
                     servicer.GetEvalNames,
-                    request_deserializer=routerbench__pb2.EvalNamesRequest.FromString,
-                    response_serializer=routerbench__pb2.EvalNamesResponse.SerializeToString,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.EvalNamesRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.EvalNamesResponse.SerializeToString,
             ),
             'GetResults': grpc.unary_unary_rpc_method_handler(
                     servicer.GetResults,
-                    request_deserializer=routerbench__pb2.ResultsRequest.FromString,
-                    response_serializer=routerbench__pb2.ResultsResponse.SerializeToString,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ResultsRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.ResultsResponse.SerializeToString,
             ),
             'GetChartData': grpc.unary_unary_rpc_method_handler(
                     servicer.GetChartData,
-                    request_deserializer=routerbench__pb2.ChartRequest.FromString,
-                    response_serializer=routerbench__pb2.ChartResponse.SerializeToString,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ChartRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.ChartResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'routerbench.RouterBench', rpc_method_handlers)
+            'routerbench.v1.RouterBench', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
 
 
@@ -106,9 +106,9 @@ class RouterBench(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/routerbench.RouterBench/GetEvalNames',
-            routerbench__pb2.EvalNamesRequest.SerializeToString,
-            routerbench__pb2.EvalNamesResponse.FromString,
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/GetEvalNames',
+            routerbench_dot_v1_dot_routerbench__pb2.EvalNamesRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.EvalNamesResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -123,9 +123,9 @@ class RouterBench(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/routerbench.RouterBench/GetResults',
-            routerbench__pb2.ResultsRequest.SerializeToString,
-            routerbench__pb2.ResultsResponse.FromString,
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/GetResults',
+            routerbench_dot_v1_dot_routerbench__pb2.ResultsRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.ResultsResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -140,8 +140,8 @@ class RouterBench(object):
             wait_for_ready=None,
             timeout=None,
             metadata=None):
-        return grpc.experimental.unary_unary(request, target, '/routerbench.RouterBench/GetChartData',
-            routerbench__pb2.ChartRequest.SerializeToString,
-            routerbench__pb2.ChartResponse.FromString,
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/GetChartData',
+            routerbench_dot_v1_dot_routerbench__pb2.ChartRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.ChartResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

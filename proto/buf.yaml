@@ -1,0 +1,37 @@
+# buf configuration — schema governance for the gRPC API.
+#
+# buf is used here for LINT and BREAKING-CHANGE DETECTION, not codegen: both run
+# offline against the .proto directly (no plugins/network needed), so they slot
+# straight into CI. Code generation stays in scripts/gen_proto.sh (grpc_tools),
+# which keeps a single source of truth for the generated Python and avoids a
+# second codegen path that could drift from it.
+#
+# Common commands (require the `buf` CLI, https://buf.build/docs/installation):
+#   buf lint                              # style + structural rules below
+#   buf breaking --against '.git#branch=main'   # block incompatible changes
+version: v2
+
+modules:
+  - path: .
+
+lint:
+  # BASIC covers the naming/structure essentials (PascalCase messages, snake_case
+  # fields, package-defined, directory matches package, …). We additionally pin
+  # the two rules that protect our versioning scheme:
+  #   PACKAGE_VERSION_SUFFIX  -> the package must end in a version (…​.v1)
+  #   PACKAGE_DIRECTORY_MATCH -> the file path must match the package
+  # Teams often tighten this to STANDARD later; that also enforces
+  # <Method>Request/<Method>Response message names, which would require renaming
+  # our shared request/response messages, so it's deferred.
+  use:
+    - BASIC
+    - PACKAGE_VERSION_SUFFIX
+    - PACKAGE_DIRECTORY_MATCH
+
+breaking:
+  # FILE is the recommended default: it flags both wire-incompatible changes
+  # (renumbering/removing a field, changing an RPC signature) and source-breaking
+  # renames. This is the automated enforcement of the "never renumber a field"
+  # rule documented in routerbench.proto.
+  use:
+    - FILE

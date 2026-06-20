@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "routerbench"
+version = "0.1"
+description = "Code for the RouterBench paper"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Jason Hu", email = "jason@withmartian.com" },
+    { name = "Jacob Bieker" },
+]
+
+# Abstract/direct dependencies only — the packages this code actually imports.
+# Lower bounds express intent ("at least what we know works"); the *exact*
+# versions of these and their full transitive tree are pinned in the generated
+# lock file, requirements.txt (produced by `pip-compile`, see below).
+dependencies = [
+    "fsspec>=2023.10.0",
+    "gcsfs>=2023.10.0",
+    "google-cloud-storage>=2.13.0",
+    "grpcio>=1.62.3",
+    "grpcio-health-checking>=1.62.3",
+    "prometheus-client>=0.20.0",
+    "protobuf>=4.25.0,<5",
+    "jsonargparse>=4.27.5",
+    "jsonlines>=4.0.0",
+    "matplotlib>=3.8.1",
+    "modal>=0.55.4073",
+    "numpy>=1.26.4,<2",
+    "pandas>=2.2.3",
+    "pymongo>=4.10.1",
+    "python-dotenv>=1.0.0",
+    "scikit-learn>=1.5.2",
+    "sentence-transformers>=3.0.1",
+    "tokencost>=0.0.5",
+    "tqdm>=4.66.1",
+]
+
+[project.optional-dependencies]
+# Dev/CI-only: linters, the test runner, the in-memory Mongo used by the cache
+# tests, and the gRPC code generator (grpc_tools.protoc). None of these are
+# needed at runtime, so they stay out of the runtime image.
+dev = [
+    "black>=23.11.0",
+    "flake8>=6.1.0",
+    "isort>=5.12.0",
+    "pytest>=7.4",
+    "mongomock>=4.1",
+    "grpcio-tools>=1.62.3",
+]
+
+# Optional OpenTelemetry tracing stack. Kept separate so the base image stays
+# lean; the server only enables tracing when these are present AND
+# ROUTERBENCH_TRACING_ENABLED is set. Install with: pip install '.[observability]'.
+observability = [
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-grpc>=0.41b0",
+]
+
+# The package is a flat layout: importable packages plus a handful of loose
+# top-level modules (utils.py, data_result.py, the pipeline scripts) that the
+# code imports by bare name (e.g. `from data_result import ...`).
+[tool.setuptools.packages.find]
+include = ["convertors*", "embedding*", "evaluation*", "grpc_api*", "routers*"]
+
+[tool.setuptools]
+py-modules = [
+    "utils",
+    "data_result",
+    "evaluate_utils",
+    "convert_data",
+    "visualize_results",
+    "modal_router",
+]

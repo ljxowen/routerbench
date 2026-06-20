@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "routerbench-gateway"
+version = "0.1.0"
+description = "Thin FastAPI gateway forwarding REST to the routerbench gRPC service"
+requires-python = ">=3.11"
+
+# Abstract/direct dependencies only. The gateway holds no data or ML deps — it
+# just speaks HTTP to the browser and gRPC to the microservice. Exact versions
+# and the transitive tree are pinned in the generated lock file requirements.txt.
+dependencies = [
+    "fastapi>=0.104.1",
+    "uvicorn>=0.49.0",
+    "grpcio>=1.62.3",
+    "prometheus-client>=0.20.0",
+    "protobuf>=4.25.0,<5",
+]
+
+[project.optional-dependencies]
+# grpc_tools.protoc, used to regenerate the _proto stubs from the shared .proto.
+dev = [
+    "grpcio-tools>=1.62.3",
+]
+
+# Optional OpenTelemetry tracing stack. Kept separate so the base image stays
+# lean; tracing only turns on when these are present AND GATEWAY_TRACING_ENABLED
+# is set. Install with: pip install '.[observability]'.
+observability = [
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-grpc>=0.41b0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+]
+
+[tool.setuptools.packages.find]
+include = ["gateway*"]

@@ -45,7 +45,25 @@ black $(git ls-files '*.py')
 isort $(git ls-files '*.py')
 ```
 `$(git ls-files '*.py')` is for running only the files tracked by git, so exclude virtual env files or data files.
-You may need to run `pip install flake8 black isort` if you don't have them installed.
+The linters (and pytest, mongomock, grpcio-tools) are declared in the `[dev]` extra — install them with `pip install -e ".[dev]"`.
+
+## Dependency management
+
+Direct dependencies are declared in `pyproject.toml` (`[project.dependencies]` for
+runtime, the `dev` optional group for tooling). The pinned `requirements.txt` /
+`requirements-dev.txt` are **generated lock files** — do not edit them by hand.
+After changing a dependency in `pyproject.toml`, regenerate the locks with
+[pip-tools](https://github.com/jazzband/pip-tools):
+
+```bash
+pip install pip-tools
+pip-compile --strip-extras -o requirements.txt pyproject.toml              # runtime lock
+pip-compile --strip-extras --extra dev -o requirements-dev.txt pyproject.toml  # dev lock
+```
+
+pip-compile keeps existing pins unless you pass `--upgrade` (or `-P <pkg>` for a
+single package). Install from a lock with `pip install -r requirements.txt`. The
+Docker images build from these lock files for reproducible builds.
 
 ## Modal update Guide
 To deploy the updated modal app, run the following commands:
