@@ -1,0 +1,25 @@
+# Prometheus scrape configuration for the RouterBench backends.
+#
+# Prometheus pulls /metrics from each target on an interval and stores the values
+# as time series. Targets are addressed by their docker-compose service name on
+# the shared compose network (not localhost), so this only works inside compose.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # The gRPC microservice exposes its metrics on a dedicated HTTP port (9090),
+  # separate from the gRPC port (50051).
+  - job_name: routerbench-service
+    static_configs:
+      - targets: ["routerbench:9090"]
+
+  # The gateway mounts /metrics on its main API port (8000).
+  - job_name: routerbench-gateway
+    static_configs:
+      - targets: ["gateway:8000"]
+
+  # Prometheus scraping itself — handy for confirming the stack is alive.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

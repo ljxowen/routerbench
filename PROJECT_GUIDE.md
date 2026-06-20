@@ -61,6 +61,12 @@ routerbench/
 ├── scripts/
 │   ├── gen_proto.sh           # regenerate gRPC stubs from the proto (both sides)
 │   └── fix_proto_imports.py   # rewrite protoc imports to relative (replaces a perl hack)
+├── monitoring/                # Prometheus + Tempo + Grafana stack (see §6)
+│   ├── prometheus/prometheus.yml          # scrape config (service:9090, gateway:8000)
+│   ├── tempo/tempo.yml        # trace backend: receives OTLP spans, serves Grafana
+│   └── grafana/
+│       ├── provisioning/      # auto-wired datasources (Prometheus + Tempo) + dashboard loader
+│       └── dashboards/grpc.json           # preset "RouterBench gRPC" dashboard
 │
 ├── frontend/                  # React + Vite SPA (TypeScript)
 │   ├── vite.config.ts         # port 3000, proxies /api → localhost:8000
@@ -145,11 +151,13 @@ cd gateway && uvicorn gateway.main:app --port 8000
 cd frontend && npm run dev
 ```
 
-Or with Docker (backend only; run the frontend separately):
+Or with Docker (backend + monitoring; run the frontend separately):
 
 ```bash
-docker compose up --build   # gateway on :8000, service internal-only
+docker compose up --build   # gateway :8000, service internal, Grafana :3001, Prometheus :9091
 ```
+
+This also starts the Prometheus + Grafana monitoring stack — see §6.
 
 The service serves the pickle named in
 [services/routerbench/grpc_api/config.py](services/routerbench/grpc_api/config.py)
@@ -233,11 +241,12 @@ Both backends ship with production cross-cutting concerns. The mechanism is gRPC
     `_CodeCaptureContext` in [observability.py](services/routerbench/grpc_api/observability.py)).
 - **Structured logging** — one line per RPC (method, code, latency, peer), INFO on
   success / WARNING on failure.
-- **Tracing (OpenTelemetry)** — **optional**, off by default so the base image runs
-  without the OTel packages. Enable with `ROUTERBENCH_TRACING_ENABLED=1` (service) /
-  `GATEWAY_TRACING_ENABLED=1` (gateway) plus `pip install '.[observability]'` and an
-  `OTEL_EXPORTER_OTLP_ENDPOINT`. Trace context propagates over gRPC metadata, so an
-  HTTP request → gateway → service shows up as one end-to-end trace.
+- **Tracing (OpenTelemetry)** — **on in the compose stack, optional elsewhere**. The
+  code is gated by `ROUTERBENCH_TRACING_ENABLED=1` (service) / `GATEWAY_TRACING_ENABLED=1`
+  (gateway) + an `OTEL_EXPORTER_OTLP_ENDPOINT`; compose sets both to push to Tempo. (For
+  a bare `pip install`, add the OTel packages via `'.[observability]'`.) Trace context
+  propagates over gRPC metadata, so an HTTP request → gateway → service is one end-to-end
+  trace. Off by default outside compose so the base image runs without the OTel packages.
 - **Health protocol** — the service implements the standard `grpc.health.v1.Health`
   service and only reports `SERVING` once the pickle is loaded. [health_probe.py](services/routerbench/grpc_api/health_probe.py)
   (`python -m grpc_api.health_probe`) wraps it for container/k8s probes; the
@@ -249,6 +258,26 @@ Both backends ship with production cross-cutting concerns. The mechanism is gRPC
 Config knobs (all env-overridable) live in
 [grpc_api/config.py](services/routerbench/grpc_api/config.py) and
 [gateway/config.py](gateway/gateway/config.py).
+
+### Viewing it — the bundled Prometheus + Tempo + Grafana stack
+
+`docker compose up` also starts **Prometheus** (`:9091`, metrics), **Tempo** (`:3200`,
+traces) and **Grafana** (`:3001`, the UI), configured from `monitoring/`. The raw
+`/metrics` text and OTLP spans are the machine-facing layers; **humans look at
+Grafana** — one pane of glass over both metrics and traces.
+
+- **http://localhost:3001** — Grafana (no login):
+  - the pre-provisioned *"RouterBench gRPC"* dashboard (QPS, P95 latency, error ratio,
+    memory) from PromQL over the `grpc_server_*` metrics;
+  - **Explore → Tempo → Search** to find recent traces; one `GET /api/results` is a
+    single trace spanning gateway → service.
+- **http://localhost:9091** — Prometheus UI, for target health and ad-hoc PromQL.
+
+Everything is auto-provisioned ([monitoring/grafana/provisioning/](monitoring/grafana/provisioning/)
+wires the Prometheus + Tempo datasources and loads
+[dashboards/grpc.json](monitoring/grafana/dashboards/grpc.json)), so it's live on first
+boot. To make data flow, send traffic (`curl localhost:8000/api/results`) and watch
+(dashboard refreshes every 10s; traces appear in Tempo within ~1–2 min).
 
 **Not yet done (P1, deferred):** client channel options (keepalive/retry/max message
 size), per-call deadlines, servicer error→status-code mapping, and TLS. These are
@@ -330,6 +359,8 @@ Get that file in place first (or point `PKL_PATH` at one you have).
 | Change which results file is served | `services/routerbench/grpc_api/config.py` (`PKL_PATH`) |
 | Change the gRPC contract | edit `proto/routerbench/v1/routerbench.proto` → `make proto` → `make proto-lint` |
 | Add/change a gRPC metric or interceptor | `grpc_api/observability.py` (server) / `gateway/observability.py` (client) |
+| Look at monitoring dashboards | `docker compose up` → Grafana at `localhost:3001` (§6) |
+| Change scrape config or dashboards | `monitoring/` (Prometheus yml, Grafana provisioning + `grpc.json`) |
 | Tune ports/grace/tracing | `grpc_api/config.py`, `gateway/config.py` (env-overridable) |
 | Add a new router algorithm | subclass `AbstractRouter` in `routers/`, wire into `evaluate_routers.py` |
 | Add a new input data format | subclass `AbstractConvertor` in `convertors/` |

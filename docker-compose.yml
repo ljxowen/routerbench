@@ -8,6 +8,10 @@ services:
     ports:
       # Prometheus metrics, scrapeable from the host. gRPC (50051) stays internal.
       - "9090:9090"
+    environment:
+      # Turn on OpenTelemetry tracing and push spans to Tempo over OTLP/gRPC.
+      - ROUTERBENCH_TRACING_ENABLED=1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
     volumes:
       # Mount data at runtime instead of baking it into the image.
       - ./services/routerbench/data:/app/data
@@ -28,9 +32,59 @@ services:
     environment:
       # Reach the microservice by its compose service name.
       - ROUTERBENCH_GRPC_TARGET=routerbench:50051
+      # Trace the HTTP entrypoint + the outbound gRPC call, pushed to Tempo. The
+      # trace context propagates to the service, so one request = one trace.
+      - GATEWAY_TRACING_ENABLED=1
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4317
     depends_on:
       routerbench:
         # Wait for the healthcheck to pass, not just for the container to start,
         # so the gateway never sends RPCs before the service is ready (no more
         # startup-race 503s).
         condition: service_healthy
+
+  # ---- Monitoring stack (optional) -----------------------------------------
+  # Prometheus scrapes /metrics (pull); Tempo receives traces (push); Grafana is
+  # the single pane of glass over both. Open Grafana, not the raw /metrics text.
+
+  # Tempo: trace backend. Receives OTLP spans from the backends on :4317 and
+  # serves them to Grafana's Tempo datasource on :3200.
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo/tempo.yml"]
+    ports:
+      - "3200:3200"   # Tempo query API (handy for debugging; Grafana uses it too)
+    volumes:
+      - ./monitoring/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+
+  # Prometheus: pulls metrics on an interval and stores them as time series.
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports:
+      # Prometheus UI/API on the host at :9091 (9090 is taken by the service's
+      # own metrics port mapping above).
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - routerbench
+      - gateway
+
+  # Grafana: dashboards + alerting. Datasource and the gRPC dashboard are
+  # auto-provisioned, so it works on first boot with no manual setup.
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      # Grafana UI at http://localhost:3001 (3000 is the frontend dev server).
+      - "3001:3000"
+    environment:
+      # Local-dev convenience: open the UI without a login prompt.
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+      - tempo

@@ -68,8 +68,37 @@ cd frontend && npm run dev
 docker compose up --build
 ```
 
-The gateway is published on `:8000`; run the frontend separately with
-`npm run dev`.
+This brings up the **gateway** (`:8000`), the **routerbench** service (gRPC
+internal; metrics on `:9090`), and the monitoring stack — **Prometheus** (`:9091`),
+**Tempo** (traces, `:3200`) and **Grafana** (`:3001`). Run the frontend separately
+with `npm run dev`.
+
+## Monitoring (Prometheus + Grafana)
+
+The backends expose Prometheus metrics (`grpc_server_*` / `grpc_client_*`, plus
+process metrics); the bundled stack scrapes and visualizes them. After
+`docker compose up`:
+
+| Open | What you get |
+|------|--------------|
+| http://localhost:3001 | **Grafana** — no login; the pre-provisioned **"RouterBench gRPC"** dashboard (QPS, P95 latency, error ratio, memory), plus **traces** under Explore → Tempo |
+| http://localhost:9091 | Prometheus UI (target health, ad-hoc PromQL) |
+
+Generate some traffic so the panels move, then watch the dashboard (10s refresh):
+
+```bash
+curl localhost:8000/api/results
+curl localhost:8000/api/evals
+```
+
+Datasources and the dashboard are auto-provisioned from `monitoring/` — no manual
+setup. The raw `/metrics` endpoints (`:9090` service, `:8000/metrics` gateway) are
+the machine-facing layer Prometheus scrapes; you look at Grafana, not that text.
+
+**Distributed tracing** is enabled in the compose stack: the backends push OpenTelemetry
+spans to **Tempo**, viewable in the same Grafana (**Explore → Tempo**, *Search* for
+recent traces). One `GET /api/results` shows as a single trace spanning gateway →
+service. It's a single pane of glass — **metrics and traces in one Grafana**.
 
 ## Regenerating gRPC code after editing the proto
 

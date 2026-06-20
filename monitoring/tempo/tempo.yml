@@ -1,0 +1,35 @@
+# Tempo configuration — the trace backend behind Grafana.
+#
+# Tempo receives spans over OTLP (what the service/gateway push via the OTel SDK),
+# stores them, and serves them to Grafana's Tempo datasource. This is a minimal
+# single-binary, local-disk setup for dev: no object storage, no clustering.
+server:
+  http_listen_port: 3200
+
+# Phone-home usage reporting off.
+usage_report:
+  reporting_enabled: false
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        # The backends export to tempo:4317 (gRPC). HTTP/4318 is enabled too for
+        # convenience (e.g. curl-based span injection).
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  # Flush blocks quickly so traces show up in Grafana within ~minutes, not hours
+  # (dev-friendly; production uses much larger windows).
+  max_block_duration: 5m
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal

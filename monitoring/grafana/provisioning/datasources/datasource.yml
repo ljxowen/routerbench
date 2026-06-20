@@ -1,0 +1,23 @@
+# Auto-provisioned Grafana datasource: points Grafana at the Prometheus container.
+# Provisioning means the datasource exists on first boot with no manual clicking.
+# The fixed uid lets the bundled dashboard reference this datasource reliably.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+
+  # Tempo holds the distributed traces. With both datasources in one Grafana you
+  # get a single pane of glass: metrics (Prometheus) and traces (Tempo) side by
+  # side, and the Explore view can search/inspect span trees.
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    editable: true
