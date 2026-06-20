@@ -73,7 +73,7 @@
       "targets": [
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "expr": "sum(rate(grpc_server_handled_total{grpc_code!=\"OK\"}[$__rate_interval])) / clamp_min(sum(rate(grpc_server_handled_total[$__rate_interval])), 1)",
+          "expr": "(sum(rate(grpc_server_handled_total{grpc_code!=\"OK\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(grpc_server_handled_total[$__rate_interval])), 1)",
           "refId": "A"
         }
       ]
