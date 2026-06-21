@@ -20,8 +20,9 @@ The repo has two halves:
    *precomputed* evaluation results to a browser UI for interactive exploration
    (tables, heatmaps, performance-vs-cost charts).
 
-The web app does **not** retrain anything. It loads a pickled results file and
-serves it. All the heavy ML work happens offline in the research pipeline.
+The web app does **not** retrain anything. It loads the precomputed results from
+**MongoDB** (the latest run for `DATA_NAME`) and serves them. All the heavy ML
+work happens offline in the research pipeline.
 
 ## 2. Architecture at a glance
 
@@ -35,9 +36,9 @@ frontend (React/Vite)  ──REST/HTTP──►  gateway (FastAPI)  ──gRPC�
 - **`frontend/`** — React + Vite SPA. Dev server proxies `/api/*` → gateway:8000.
 - **`gateway/`** — Thin FastAPI front door. Holds **no data and no ML deps**. Converts
   REST ⇄ gRPC and nothing else. Instrumented (metrics/tracing) — see §6.
-- **`services/routerbench/`** — The core microservice. Loads the results pickle into
-  memory at startup and exposes a **gRPC-only** API. Also contains the entire offline
-  research pipeline (router training, evaluation, plotting).
+- **`services/routerbench/`** — The core microservice. Loads the results from
+  **MongoDB** into memory at startup and exposes a **gRPC-only** API. Also contains the
+  entire offline research pipeline (router training, evaluation, plotting).
 - **`proto/routerbench/v1/routerbench.proto`** — The shared, **versioned** gRPC contract
   (single source of truth; package `routerbench.v1`). Both gateway and service generate
   their own Python stubs from it; [buf](https://buf.build) lints it and blocks breaking
@@ -99,13 +100,14 @@ routerbench/
     │   ├── service.py         # servicer: implements the 3 RPCs, dict⇄protobuf glue
     │   ├── observability.py   # metrics + logging interceptors, OTel tracing setup
     │   ├── health_probe.py    # CLI gRPC health check (`python -m grpc_api.health_probe`)
-    │   ├── state.py           # AppState: loads the results pickle once at startup
-    │   ├── config.py          # PKL_PATH, GRPC_PORT, METRICS_PORT, grace, tracing flags
+    │   ├── state.py           # AppState: loads results from MongoDB once at startup
+    │   ├── config.py          # CONNECTION_STRING/DATA_NAME (+ PKL_PATH fallback), ports, flags
     │   └── _proto/routerbench/v1/  # the service's generated stubs (isolated, versioned)
     │
-    ├── data_result.py         # turns the results collection into flat API rows
+    ├── data_result.py         # load results from Mongo + turn the collection into API rows
     ├── evaluation/
     │   ├── eval.py            # EvaluationResultCollection: selection + chart geometry
+    │   ├── results_store.py   # ResultsStore: read/write eval results in MongoDB
     │   ├── AIQ.py             # non-decreasing convex hull (the NDCH frontier math)
     │   └── utils.py           # model_metric_dict (router types → their hyperparams)
     │
@@ -128,9 +130,10 @@ routerbench/
     ├── visualize_results.py   # pipeline step 3 (matplotlib performance-vs-cost plot)
     ├── modal_router.py        # Modal deployment wrapper for cloud runs
     ├── configs/               # example YAML configs for each pipeline step
-    └── data/                  # data + results (mostly gitignored — see §9)
-        ├── routerbench/       # input pickle + the served results pickle
-        ├── eval_results/      # per-benchmark CSV results
+    └── data/                  # inputs + regenerable artifacts (mostly gitignored — see §9)
+        ├── routerbench_*.pkl  # input datasets (HF symlinks; pipeline inputs)
+        ├── routerbench/       # per-run archive: combined results (csv/pkl) + run configs
+        ├── eval_results/      # per-benchmark CSV results (pipeline intermediates)
         └── analysis_results/  # generated plots
 ```
 
@@ -141,7 +144,8 @@ routerbench/
 Three processes. From the repo root:
 
 ```bash
-# 1. microservice (gRPC, :50051) — loads the results pickle into memory
+# 1. microservice (gRPC, :50051) — loads results from MongoDB into memory
+#    (needs CONNECTION_STRING set and a populated results store; see below)
 cd services/routerbench && python -m grpc_api.server
 
 # 2. gateway (REST, :8000)
@@ -159,11 +163,14 @@ docker compose up --build   # gateway :8000, service internal, Grafana :3001, Pr
 
 This also starts the Prometheus + Grafana monitoring stack — see §6.
 
-The service serves the pickle named in
+The service loads results from **MongoDB** — the latest run for `DATA_NAME`
+(default `routerbench`), via `CONNECTION_STRING`. See
 [services/routerbench/grpc_api/config.py](services/routerbench/grpc_api/config.py)
-(`PKL_PATH` → `data/routerbench/eval_results/eval_results__06-03-14__routerbench.pkl`).
-**That file must exist** for the app to start usefully — it is the precomputed
-`EvaluationResultCollection`.
+and `AppState.load()` in
+[state.py](services/routerbench/grpc_api/state.py). **Mongo must be reachable and
+hold at least one run** (produced by the offline pipeline, §4.B) or startup fails
+with a clear error. The old local-pickle fallback (`PKL_PATH`) is kept in the code
+but commented out — see §9.
 
 ### B. The offline research pipeline (produce results)
 
@@ -172,15 +179,22 @@ Three steps, each driven by a YAML config in `configs/`:
 
 1. `convert_data.py --config=configs/convert_data.yaml` — normalize raw eval
    formats (martian-evals / openai-evals) into a common wide-format pickle.
+   Computes prompt embeddings, cached in MongoDB.
 2. `evaluate_routers.py --config=configs/evaluate_routers.yaml` — train kNN/MLP/SVM/
    cascading routers across hyperparameter grids and willingness-to-pay sweeps;
-   emits per-benchmark CSVs and a combined `EvaluationResultCollection` pickle.
-   Runs locally (`--local`) or on Modal (default).
+   emits per-benchmark CSVs and a combined `EvaluationResultCollection` (csv/pkl),
+   **and writes the long-format results to MongoDB** (`eval_results` + `eval_runs`,
+   tagged with a `run_id`) — this is what the web app then serves. Runs locally
+   (`--local`) or on Modal (default). Pass `--local-cache` to skip MongoDB.
 3. `visualize_results.py --config=configs/visualize.yaml` — matplotlib
-   performance-vs-cost plot from the collection.
+   performance-vs-cost plot from the collection (`--from-mongo` to load the latest
+   run from MongoDB instead of a pickle file).
 
-Setup: `pip install -e .` from `services/routerbench/`. Optionally a `.env` with
-`CONNECTION_STRING=<mongodb uri>` for the embedding cache (else use `local_cache: true`).
+Setup: `pip install -e .` from `services/routerbench/`. A `.env` with
+`CONNECTION_STRING=<mongodb uri>` powers both the embedding cache and the results
+store (the service reads results from there; the pipeline writes them). For an
+offline run with no Mongo, set `local_cache: true` to compute embeddings in-process
+and skip the MongoDB writes.
 
 ## 5. The gRPC contract (`proto/routerbench/v1/routerbench.proto`)
 
@@ -248,7 +262,7 @@ Both backends ship with production cross-cutting concerns. The mechanism is gRPC
   propagates over gRPC metadata, so an HTTP request → gateway → service is one end-to-end
   trace. Off by default outside compose so the base image runs without the OTel packages.
 - **Health protocol** — the service implements the standard `grpc.health.v1.Health`
-  service and only reports `SERVING` once the pickle is loaded. [health_probe.py](services/routerbench/grpc_api/health_probe.py)
+  service and only reports `SERVING` once the results are loaded from MongoDB. [health_probe.py](services/routerbench/grpc_api/health_probe.py)
   (`python -m grpc_api.health_probe`) wraps it for container/k8s probes; the
   docker-compose `healthcheck` uses it, and the gateway's `depends_on:
   service_healthy` gates startup on it — **this is what fixes the old 503 race**.
@@ -321,16 +335,24 @@ API types and fetch wrappers live in [api/client.ts](frontend/src/api/client.ts)
 ## 9. Data files & gitignore
 
 The `data/` directory is **mostly gitignored** (large pickles/datasets are not in git).
-What's committed: `.gitkeep` placeholders, the YAML config snapshots, and the
-embedding cache. The served results pickle and the input dataset are **not** in git —
-they must be obtained from the
-[Hugging Face dataset](https://huggingface.co/datasets/withmartian/routerbench) or
-regenerated via the offline pipeline. The git history confirms the dataset is
-explicitly excluded (commit `b8539f5`: "exclude dataset from git").
+What's committed: `.gitkeep` placeholders and the YAML config snapshots. The input
+datasets, embedding cache, and result artifacts are **not** in git — inputs come from
+the [Hugging Face dataset](https://huggingface.co/datasets/withmartian/routerbench),
+and everything else is regenerated by the offline pipeline. The git history confirms
+the dataset is explicitly excluded (commit `b8539f5`: "exclude dataset from git").
 
-**Implication when setting up a fresh clone**: the web app will start but
-`grpc_api.state.AppState.load()` will fail if the pickle at `PKL_PATH` is missing.
-Get that file in place first (or point `PKL_PATH` at one you have).
+**Where results live now**: the canonical store is **MongoDB** —
+`embedding_cache.embedding_cache` (prompt embeddings) and `routerbench.eval_results` +
+`routerbench.eval_runs` (long-format results, one run per `run_id`). The pipeline
+writes there; the service reads from there. The local `.pkl`/`.csv` artifacts under
+`data/` are byproducts and safe to delete (regenerable).
+
+**Implication when setting up a fresh clone**: the service reads from MongoDB, so
+`grpc_api.state.AppState.load()` will fail with a clear error until Mongo is reachable
+**and** holds at least one run. Run the offline pipeline (§4.B) to populate it first.
+Browse the data with mongo-express at `localhost:8081` (compose). The old local-pickle
+fallback lives in `state.py`, commented out — uncomment it (and `PKL_PATH`) to restore
+file-based loading.
 
 ## 10. State of the project (as of last review)
 
@@ -356,7 +378,8 @@ Get that file in place first (or point `PKL_PATH` at one you have).
 | I want to… | Go to |
 |------------|-------|
 | Add/change a REST endpoint | `gateway/gateway/routes/` + `router.py`, then mirror in proto + `grpc_api/service.py` |
-| Change which results file is served | `services/routerbench/grpc_api/config.py` (`PKL_PATH`) |
+| Change which results are served | `grpc_api/config.py` (`DATA_NAME`/`CONNECTION_STRING`); produce a run via the pipeline |
+| Browse stored data (embeddings/results) | mongo-express at `localhost:8081`, or `evaluation/results_store.py` |
 | Change the gRPC contract | edit `proto/routerbench/v1/routerbench.proto` → `make proto` → `make proto-lint` |
 | Add/change a gRPC metric or interceptor | `grpc_api/observability.py` (server) / `gateway/observability.py` (client) |
 | Look at monitoring dashboards | `docker compose up` → Grafana at `localhost:3001` (§6) |

@@ -12,8 +12,9 @@ frontend (React)  ──REST/HTTP──►  gateway (FastAPI)  ──gRPC──�
 
 - **gateway/** — thin FastAPI front door. Exposes REST to the browser, forwards
   everything to the microservice over gRPC. Holds no data or ML deps.
-- **services/routerbench/** — the core microservice. Loads the evaluation data
-  and runs the router logic; exposes a gRPC API only.
+- **services/routerbench/** — the core microservice. Loads the evaluation results
+  from MongoDB at startup and exposes a gRPC API only; also houses the offline
+  pipeline that produces those results.
 - **proto/** — the shared, versioned gRPC contract at
   `proto/routerbench/v1/routerbench.proto` (package `routerbench.v1`). Both sides
   generate their own stubs from it; [buf](https://buf.build) lints it and guards
@@ -69,9 +70,10 @@ docker compose up --build
 ```
 
 This brings up the **gateway** (`:8000`), the **routerbench** service (gRPC
-internal; metrics on `:9090`), and the monitoring stack — **Prometheus** (`:9091`),
-**Tempo** (traces, `:3200`) and **Grafana** (`:3001`). Run the frontend separately
-with `npm run dev`.
+internal; metrics on `:9090`), **MongoDB** (`:27017`, the embedding cache + results
+store) with **mongo-express** (`:8081`, a web UI to browse it), and the monitoring
+stack — **Prometheus** (`:9091`), **Tempo** (traces, `:3200`) and **Grafana**
+(`:3001`). Run the frontend separately with `npm run dev`.
 
 ## Monitoring (Prometheus + Grafana)
 
@@ -83,6 +85,10 @@ process metrics); the bundled stack scrapes and visualizes them. After
 |------|--------------|
 | http://localhost:3001 | **Grafana** — no login; the pre-provisioned **"RouterBench gRPC"** dashboard (QPS, P95 latency, error ratio, memory), plus **traces** under Explore → Tempo |
 | http://localhost:9091 | Prometheus UI (target health, ad-hoc PromQL) |
+| http://localhost:8081 | **mongo-express** — browse the MongoDB embedding cache + results (`eval_results` / `eval_runs`); basic auth `admin` / `admin` |
+
+The service connects to MongoDB at `mongodb://mongo:27017` inside compose (exposed on
+the host as `mongodb://localhost:27017` for the offline pipeline and tools like Compass).
 
 Generate some traffic so the panels move, then watch the dashboard (10s refresh):
 
