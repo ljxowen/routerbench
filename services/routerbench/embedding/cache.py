@@ -9,7 +9,6 @@ import fsspec
 import numpy as np
 import pymongo
 import sentence_transformers
-from dotenv import load_dotenv
 from tqdm import tqdm
 
 _log = logging.getLogger(__name__)
@@ -28,11 +27,19 @@ class EmbeddingCache:
         connection_string: str = None,
         local_cache_path: Optional[str] = None,
         local_mode: bool = False,
+        use_pickle_fallback: bool = False,
     ):
         self.local_mode = local_mode
+        # MongoDB is the default cache. The local pickle files are kept as an
+        # optional fallback (set use_pickle_fallback=True) rather than always
+        # being read/written on every call.
+        self.use_pickle_fallback = use_pickle_fallback
         if not local_mode:
             self.client = pymongo.MongoClient(connection_string)
             self.db = self.client["embedding_cache"]
+            # Idempotent: the hash is the natural lookup key, so index it for
+            # fast `$in` reads. Created here so a fresh DB is ready on first use.
+            self.db.embedding_cache.create_index("hash")
         self.local_cache = []
         self.local_cache_path = local_cache_path
 
@@ -62,38 +69,44 @@ class EmbeddingCache:
                 )
                 print(f"Got {len(embeddings)} embeddings from the local cache list")
                 return embeddings
-        if self.local_cache_path is not None and os.path.exists(self.local_cache_path):
-            with fsspec.open(self.local_cache_path, "rb") as f:
-                self.local_cache = pickle.loads(f.read())
-            # Check if all hashes are in local cache
-            local_hashes = [result["hash"] for result in self.local_cache]
-            if all([h in local_hashes for h in hashes]):
-                # Get the embeddings from the local cache
-                embeddings = np.asarray(
-                    [
-                        self.local_cache[local_hashes.index(h)]["embedding"]
-                        for h in hashes
-                    ]
-                )
-                print(
-                    f"Got {len(embeddings)} embeddings from the local cache file {self.local_cache_path}"
-                )
-                return embeddings
-        if os.path.exists(f"data/embedding_cache_{embedding_model}.pkl"):
-            with fsspec.open(f"data/embedding_cache_{embedding_model}.pkl", "rb") as f:
-                self.local_cache = pickle.loads(f.read())
-            # Check if all hashes are in local cache
-            local_hashes = [result["hash"] for result in self.local_cache]
-            if all([h in local_hashes for h in hashes]):
-                # Get the embeddings from the local cache
-                embeddings = np.asarray(
-                    [
-                        self.local_cache[local_hashes.index(h)]["embedding"]
-                        for h in hashes
-                    ]
-                )
-                print(f"Got {len(embeddings)} embeddings from the local cache")
-                return embeddings
+        if self.use_pickle_fallback:
+            if self.local_cache_path is not None and os.path.exists(
+                self.local_cache_path
+            ):
+                with fsspec.open(self.local_cache_path, "rb") as f:
+                    self.local_cache = pickle.loads(f.read())
+                # Check if all hashes are in local cache
+                local_hashes = [result["hash"] for result in self.local_cache]
+                if all([h in local_hashes for h in hashes]):
+                    # Get the embeddings from the local cache
+                    embeddings = np.asarray(
+                        [
+                            self.local_cache[local_hashes.index(h)]["embedding"]
+                            for h in hashes
+                        ]
+                    )
+                    print(
+                        f"Got {len(embeddings)} embeddings from "
+                        f"the local cache file {self.local_cache_path}"
+                    )
+                    return embeddings
+            if os.path.exists(f"data/embedding_cache_{embedding_model}.pkl"):
+                with fsspec.open(
+                    f"data/embedding_cache_{embedding_model}.pkl", "rb"
+                ) as f:
+                    self.local_cache = pickle.loads(f.read())
+                # Check if all hashes are in local cache
+                local_hashes = [result["hash"] for result in self.local_cache]
+                if all([h in local_hashes for h in hashes]):
+                    # Get the embeddings from the local cache
+                    embeddings = np.asarray(
+                        [
+                            self.local_cache[local_hashes.index(h)]["embedding"]
+                            for h in hashes
+                        ]
+                    )
+                    print(f"Got {len(embeddings)} embeddings from the local cache")
+                    return embeddings
         # Check if the hash is already in the local cache
         if self.local_mode:
             embeddings = self._compute_embedding(prompts, embedding_model)
@@ -121,7 +134,8 @@ class EmbeddingCache:
                     )
                 )
             _log.info(
-                f"Got {len(results)} cached embeddings for {len(prompts)} prompts from the cache"
+                f"Got {len(results)} cached embeddings for "
+                f"{len(prompts)} prompts from the cache"
             )
             # Get all items in self.collection that has a hash in hashes
             # If the hash is not in the collection, run the embedding model and save it
@@ -134,17 +148,24 @@ class EmbeddingCache:
                             {"hash": {"$in": search_hashes[i : i + 10000]}}
                         )
                     )
-        if os.path.exists(f"data/embedding_cache_{embedding_model}.pkl"):
-            with fsspec.open(f"data/embedding_cache_{embedding_model}.pkl", "rb") as f:
-                self.local_cache = pickle.loads(f.read())
-            self.local_cache += results
+        # Optionally mirror the results to a local pickle file. Off by default:
+        # MongoDB is the cache, so we no longer write a .pkl on every call.
+        if self.use_pickle_fallback:
+            if os.path.exists(f"data/embedding_cache_{embedding_model}.pkl"):
+                with fsspec.open(
+                    f"data/embedding_cache_{embedding_model}.pkl", "rb"
+                ) as f:
+                    self.local_cache = pickle.loads(f.read())
+                self.local_cache += results
 
-            save_cache_to_disk(
-                self.local_cache, f"data/embedding_cache_{embedding_model}.pkl"
-            )
-        else:
-            save_cache_to_disk(results, f"data/embedding_cache_{embedding_model}.pkl")
-        # Incase there are duplicates, need to add them in to the results, in the same order
+                save_cache_to_disk(
+                    self.local_cache, f"data/embedding_cache_{embedding_model}.pkl"
+                )
+            else:
+                save_cache_to_disk(
+                    results, f"data/embedding_cache_{embedding_model}.pkl"
+                )
+        # In case there are duplicates, add them to the results in the same order
         result_hashes = [result["hash"] for result in results]
         hash_indicies = [result_hashes.index(h) for h in hashes]
         final_results = []
@@ -179,7 +200,8 @@ class EmbeddingCache:
         if len(prompts) == 0:
             return
         _log.info(
-            f"Adding embeddings for {len(prompts)} prompts to the cache, after filtering"
+            f"Adding embeddings for {len(prompts)} prompts to the cache, "
+            "after filtering"
         )
         # Compute the embeddings for the prompts that are not in the collection
         embeddings = self._compute_embedding(prompts, embedding_model)

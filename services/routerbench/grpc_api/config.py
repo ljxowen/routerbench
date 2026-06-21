@@ -11,9 +11,17 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent.parent / "data"
 
 # Path to the evaluation results pickle (a serialized EvaluationResultCollection).
+# Used as a fallback when MongoDB has no results for DATA_NAME.
 PKL_PATH = str(
     DATA_DIR / "routerbench/eval_results/eval_results__06-03-14__routerbench.pkl"
 )
+
+# MongoDB connection string for the results store. When set (and a run exists),
+# the server loads results from Mongo instead of the pickle above.
+CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
+
+# Logical name identifying which run group to serve from the results store.
+DATA_NAME = os.environ.get("ROUTERBENCH_DATA_NAME", "routerbench")
 
 # Port the gRPC server listens on. 50051 is the conventional gRPC default.
 GRPC_PORT = int(os.environ.get("ROUTERBENCH_GRPC_PORT", "50051"))

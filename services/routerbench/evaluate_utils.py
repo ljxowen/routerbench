@@ -1,11 +1,12 @@
 import os
 from datetime import datetime
+from typing import Optional
 
 import gcsfs
 import pandas as pd
 import tqdm
 
-from evaluation.eval import DefaultEvaluationResult, EvaluationResultCollection
+from data_result import build_collection_from_long_df
 from routers.knn_router import KNNRouter
 from routers.mlp_router import MLPRouter
 from routers.svm_router import SVMRouter
@@ -15,7 +16,10 @@ from utils import save_data_to_file
 def save_results(result_df, train_test_split=False, eval_name: str = ""):
     today_date = datetime.now()
     date_string = today_date.strftime("%b%d:%H:%M")
-    output_filename = f"data/eval_results/eval_results-eval-{eval_name}-{date_string}{'-val_split' if train_test_split else ''}.csv"
+    output_filename = (
+        f"data/eval_results/eval_results-eval-{eval_name}-{date_string}"
+        f"{'-val_split' if train_test_split else ''}.csv"
+    )
     result_df.to_csv(
         output_filename,
         index=False,
@@ -32,8 +36,9 @@ def combined_eval_results_to_eval_collection(
     output_filenames,
     data_name: str,
     models_to_route: list[str] = (" ",),
+    connection_string: Optional[str] = None,
+    local_mode: bool = False,
 ):
-    llm_names = models_to_route + ["oracle"]
     dfs = []
     for f in output_filenames:
         df = pd.read_csv(f)
@@ -46,24 +51,7 @@ def combined_eval_results_to_eval_collection(
     result_df = result_df.drop_duplicates()
     result_df = result_df.sort_values(by=["eval_name"])
 
-    # Select all rows where model name is in llm_names
-    llm_results = result_df[result_df["model_name"].isin(llm_names)]
-    evaluation_results = []
-
-    # Get all model names that are not in llm_names
-    model_names = [
-        name for name in result_df.model_name.unique() if name not in llm_names
-    ]
-
-    for model_name in model_names:
-        single_result_df = result_df[result_df["model_name"] == model_name]
-        # Combine with llm results
-        single_result_df = pd.concat([single_result_df, llm_results])
-        evaluation_result = DefaultEvaluationResult(
-            router_name=model_name, results=single_result_df, metrics=["accuracy"]
-        )
-        evaluation_results.append(evaluation_result)
-    all_evaluation_results = EvaluationResultCollection(evaluation_results)
+    all_evaluation_results = build_collection_from_long_df(result_df, models_to_route)
     save_data_to_file(
         data=all_evaluation_results,
         save_path=f"data/{data_name}/eval_results/",
@@ -78,6 +66,25 @@ def combined_eval_results_to_eval_collection(
         data_name=data_name,
         format="pkl",
     )
+
+    # Also persist the long-format rows to MongoDB so results are queryable and
+    # the serving / visualization layers can read them back. Failures here do not
+    # abort the run — the CSV/PKL artifacts above are still written.
+    if not local_mode:
+        try:
+            from evaluation.results_store import ResultsStore
+
+            run_id = ResultsStore(connection_string).save_run(
+                data_name=data_name,
+                result_df=result_df,
+                models_to_route=list(models_to_route),
+            )
+            print(
+                f"Saved eval results to MongoDB "
+                f"(data_name={data_name}, run_id={run_id})"
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: failed to write eval results to MongoDB: {exc}")
 
 
 def generate_mlp_routers(
@@ -100,7 +107,12 @@ def generate_mlp_routers(
         # The name of the model should follow this format for easy parsing later
         # {model_name}|{param1_name}:{param1_value}|{param2_name}:{param2_value}
         hidden_layer_size_name = f"{hidden_layer_size},"
-        mlp_name = f"mlp|hidden_layer_sizes:({hidden_layer_size_name})|activation_function:{activation}|learning_rate_method:constant|learning_rate:{learning_rate}|embedding:{embed_model}|fraction:{fraction}"
+        mlp_name = (
+            f"mlp|hidden_layer_sizes:({hidden_layer_size_name})"
+            f"|activation_function:{activation}"
+            f"|learning_rate_method:constant|learning_rate:{learning_rate}"
+            f"|embedding:{embed_model}|fraction:{fraction}"
+        )
         model_routers_and_names.append((mlp_router, mlp_name))
     return model_routers_and_names
 
@@ -139,7 +151,10 @@ def generate_knn_routers(
         )
         # The name of the model should follow this format for easy parsing later
         # {model_name}|{param1_name}:{param1_value}|{param2_name}:{param2_value}
-        knn_name = f"knn|neighbors:{neighbor_count}|metric:{metric_name}|embedding:{embed_model}|fraction:{fraction}"
+        knn_name = (
+            f"knn|neighbors:{neighbor_count}|metric:{metric_name}"
+            f"|embedding:{embed_model}|fraction:{fraction}"
+        )
         model_routers_and_names.append((knn, knn_name))
     return model_routers_and_names
 

@@ -106,9 +106,11 @@ class Model:
         self.router_name = f"{router}"
         cache = EmbeddingCache(
             cache_uri,
-            local_cache_path=os.path.join(
-                "data", f"embedding_cache_{router_kwargs['embedding_model']}.pkl"
-            ),
+            # MongoDB is the cache now; the local .pkl path is only used when
+            # use_pickle_fallback=True. Kept here for easy re-enabling.
+            # local_cache_path=os.path.join(
+            #     "data", f"embedding_cache_{router_kwargs['embedding_model']}.pkl"
+            # ),
         )
         # Add to router_name all the router_kwargs, other than cache_url, separated by |
         for key, value in router_kwargs.items():

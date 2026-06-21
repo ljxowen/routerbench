@@ -545,4 +545,6 @@ if __name__ == "__main__":
         output_filenames,
         models_to_route=MODELS_TO_ROUTE,
         data_name=args.data_name if args.data_name else args.wanted_eval_names,
+        connection_string=args.cache_url,
+        local_mode=args.local_cache,
     )
