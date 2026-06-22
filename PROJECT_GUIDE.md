@@ -2,7 +2,7 @@
 
 > Auxiliary documentation for fast onboarding (humans or AI assistants). Read this
 > first to understand the architecture, the data flow, and where each piece lives.
-> Last reviewed: 2026-06-19.
+> Last reviewed: 2026-06-22.
 
 ## 1. What this project is
 
@@ -105,6 +105,7 @@ routerbench/
     │   └── _proto/routerbench/v1/  # the service's generated stubs (isolated, versioned)
     │
     ├── data_result.py         # load results from Mongo + turn the collection into API rows
+    ├── live_routing.py        # RouteTask logic: rank models for a new prompt (predictions)
     ├── evaluation/
     │   ├── eval.py            # EvaluationResultCollection: selection + chart geometry
     │   ├── results_store.py   # ResultsStore: read/write eval results in MongoDB
@@ -117,6 +118,7 @@ routerbench/
     │   ├── mlp_router.py      # MLP router
     │   ├── svm_router.py      # SVM router
     │   ├── run_cascading_router.py # cascading router
+    │   ├── router_store.py    # GridFS persistence of fitted routers (for live RouteTask)
     │   └── common.py          # TOKEN_COSTS table + MODELS_TO_ROUTE_NAMES
     │
     ├── convertors/            # raw-format → common-format ingestion
@@ -172,6 +174,11 @@ hold at least one run** (produced by the offline pipeline, §4.B) or startup fai
 with a clear error. The old local-pickle fallback (`PKL_PATH`) is kept in the code
 but commented out — see §9.
 
+`AppState.load()` also loads that run's **fitted routers** (if the run persisted
+them — local pipeline runs do) to serve live `RouteTask` (§5). They're optional:
+a run without them just leaves `RouteTask` returning `FAILED_PRECONDITION`/409
+while the three read-only RPCs keep serving.
+
 ### B. The offline research pipeline (produce results)
 
 Documented in [services/routerbench/README.md](services/routerbench/README.md).
@@ -185,7 +192,9 @@ Three steps, each driven by a YAML config in `configs/`:
    emits per-benchmark CSVs and a combined `EvaluationResultCollection` (csv/pkl),
    **and writes the long-format results to MongoDB** (`eval_results` + `eval_runs`,
    tagged with a `run_id`) — this is what the web app then serves. Runs locally
-   (`--local`) or on Modal (default). Pass `--local-cache` to skip MongoDB.
+   (`--local`) or on Modal (default). Pass `--local-cache` to skip MongoDB. On
+   **local runs** it also persists one fitted router per type to MongoDB/GridFS
+   (`router_artifacts` + `router_runs`, same `run_id`) for live `RouteTask` (§5).
 3. `visualize_results.py --config=configs/visualize.yaml` — matplotlib
    performance-vs-cost plot from the collection (`--from-mongo` to load the latest
    run from MongoDB instead of a pickle file).
@@ -198,14 +207,30 @@ and skip the MongoDB writes.
 
 ## 5. The gRPC contract (`proto/routerbench/v1/routerbench.proto`)
 
-Three read-only RPCs in the versioned package `routerbench.v1` (wire service name
-`routerbench.v1.RouterBench`). Each has a 1:1 REST endpoint on the gateway:
+Four RPCs in the versioned package `routerbench.v1` (wire service name
+`routerbench.v1.RouterBench`). Each has a 1:1 REST endpoint on the gateway. The
+first three are read-only and serve precomputed benchmark *measurements*; the
+fourth runs the fitted routers live and returns *predictions*:
 
 | RPC | REST endpoint | Returns |
 |-----|---------------|---------|
 | `GetEvalNames` | `GET /api/evals` | list of benchmark names |
 | `GetResults` | `GET /api/results?eval_name=` | flat result rows (router + LLM) |
 | `GetChartData` | `GET /api/chart?eval_name=` | performance-vs-cost chart series |
+| `RouteTask` | `POST /api/route` | live per-router model ranking for a prompt |
+
+**Live routing (`RouteTask`)** is the one write-shaped endpoint (POST, to carry
+the prompt body — still side-effect free; CORS allows GET+POST). Given a new
+prompt it asks each fitted router (knn/mlp/svm) to predict how every candidate
+LLM would do, returning each router's pick plus the full ranking
+(`predicted_performance` + `estimated_cost`). The numbers are router *estimates*
+— the LLM is never called. The routers are persisted by the offline pipeline
+(local runs) via `routers/router_store.py` (GridFS) and loaded at startup by
+`AppState`; the serving logic is `live_routing.route_task`, reusing each router's
+`predict_performance` (the scoring vector behind `batch_route_prompts`'s argmax).
+Cascading is excluded: it replays each model's true correctness/cost, which a
+novel prompt does not have. `ModelScore` fields 7–9 are reserved for a future
+"actually invoke the model" mode.
 
 Key message: **`Row`** is a flat type covering both kinds of result:
 - **router rows**: `model_name=""`, `params` populated (the hyperparameters).
@@ -300,7 +325,7 @@ runtime-robustness concerns, orthogonal to the interface work above.
 ## 7. Frontend tabs
 
 [App.tsx](frontend/src/App.tsx) fetches eval names + all results once, then renders
-one of five tabs (all in `frontend/src/components/`):
+one of six tabs (all in `frontend/src/components/`):
 
 - **Summary** (`SummaryTable.tsx`) — high-level table across benchmarks.
 - **Details** (`FilterableTable.tsx`) — all rows, filterable by benchmark.
@@ -308,6 +333,10 @@ one of five tabs (all in `frontend/src/components/`):
 - **Heatmap** (`HeatmapTable.tsx`) — color-coded grid.
 - **Chart** (`PerformanceCostChart.tsx`) — recharts scatter/line; fetches `/api/chart`
   per benchmark. Mirrors the offline matplotlib plot exactly (same selection + NDCH).
+- **Route a Task** (`RouteExplorer.tsx`) — input box + cost-sensitivity selector;
+  POSTs a prompt to `/api/route` and shows each router's pick + full model ranking.
+  Independent of the precomputed data (renders even if that load fails); banner
+  flags the numbers as predictions/estimates.
 
 API types and fetch wrappers live in [api/client.ts](frontend/src/api/client.ts).
 
@@ -342,9 +371,11 @@ and everything else is regenerated by the offline pipeline. The git history conf
 the dataset is explicitly excluded (commit `b8539f5`: "exclude dataset from git").
 
 **Where results live now**: the canonical store is **MongoDB** —
-`embedding_cache.embedding_cache` (prompt embeddings) and `routerbench.eval_results` +
-`routerbench.eval_runs` (long-format results, one run per `run_id`). The pipeline
-writes there; the service reads from there. The local `.pkl`/`.csv` artifacts under
+`embedding_cache.embedding_cache` (prompt embeddings), `routerbench.eval_results` +
+`routerbench.eval_runs` (long-format results, one run per `run_id`), and
+`routerbench.router_artifacts` (GridFS) + `routerbench.router_runs` (the fitted
+routers for live `RouteTask`, written only by local pipeline runs). The pipeline
+writes all of these; the service reads from there. The local `.pkl`/`.csv` artifacts under
 `data/` are byproducts and safe to delete (regenerable).
 
 **Implication when setting up a fresh clone**: the service reads from MongoDB, so
@@ -359,8 +390,8 @@ file-based loading.
 - **Research code**: mature — the original published paper code (kNN/MLP/SVM/cascading
   routers, convertors, Modal deployment, matplotlib visualization). Stable.
 - **Web app**: the 3-tier gateway + service + frontend stack is wired and working;
-  the gRPC contract is settled at 3 read-only RPCs in a versioned `routerbench.v1`
-  package. All read-only (CORS allows GET only).
+  the gRPC contract has 4 RPCs in a versioned `routerbench.v1` package — three
+  read-only result/chart RPCs plus live `RouteTask` (POST; CORS allows GET+POST).
 - **Production hardening**: the gRPC layer has been brought toward industrial
   standard — Prometheus metrics, structured logging, optional OTel tracing, the
   standard health protocol, and graceful shutdown (§6); plus a versioned proto,
@@ -389,6 +420,7 @@ file-based loading.
 | Add a new input data format | subclass `AbstractConvertor` in `convertors/` |
 | Change chart/selection logic | `evaluation/eval.py` (`_select_router_data`, `get_chart_data`) |
 | Add a frontend view | new component in `frontend/src/components/`, add a tab in `App.tsx` |
+| Change live-routing logic | `live_routing.py` (ranking/cost); `routers/router_store.py` (persistence) |
 | Change cost/pricing | `routers/common.py` (`TOKEN_COSTS`) |
 | Run the pipeline | `services/routerbench/README.md` (convert → evaluate → visualize) |
 ```

@@ -36,6 +36,15 @@ service RouterBench {
   // NDCH logic the matplotlib visualizer uses (see EvaluationResultCollection.
   // get_chart_data), so the frontend chart matches the offline plot exactly.
   rpc GetChartData(ChartRequest) returns (ChartResponse);
+
+  // Live single-prompt routing. Given an arbitrary user task (prompt), each
+  // available router (knn/mlp/svm) predicts how every candidate LLM would do
+  // and returns its pick plus the full ranking. Unlike the three RPCs above —
+  // which serve precomputed benchmark *measurements* — this runs the fitted
+  // routers in-process against a brand-new prompt, so the numbers are router
+  // *predictions* (expected accuracy) and *estimated* cost, not measured values.
+  // The routers are loaded at startup from the persisted run (see RouterStore).
+  rpc RouteTask(RouteTaskRequest) returns (RouteTaskResponse);
 }
 
 // Empty request: a placeholder type so GetEvalNames has a well-defined signature
@@ -116,4 +125,49 @@ message ChartResponse {
   ChartPoint oracle = 4;
   // "Zero router" frontier: the convex hull of the LLM baseline points.
   repeated ChartPoint zero_router_ndch = 5;
+}
+
+// ---- Live routing (RouteTask) ----
+
+message RouteTaskRequest {
+  // The user's task: a free-form prompt / question to route.
+  string prompt = 1;
+  // The cost/accuracy trade-off knob. 0 (default) ranks purely by predicted
+  // performance; > 0 ranks by the cost-adjusted utility the routers use
+  // internally (performance * willingness_to_pay - per-token cost terms).
+  double willingness_to_pay = 2;
+  // Restrict to specific routers (e.g. ["knn", "mlp"]); empty means all that
+  // the service has loaded.
+  repeated string router_types = 3;
+}
+
+// One candidate LLM as scored by a router for this prompt. predicted_performance
+// and estimated_cost are model estimates, never measured — we do not call the
+// LLM. Fields 7-9 are reserved for the future "actually invoke the model" mode
+// (adding them later is a backward-compatible change).
+message ModelScore {
+  string model_name = 1;            // raw model id (e.g. "gpt-4-1106-preview")
+  string display_name = 2;          // human label (e.g. "GPT-4")
+  double predicted_performance = 3; // router's expected accuracy for this prompt
+  double estimated_cost = 4;        // est. USD: exact prompt tokens + avg response
+  double utility = 5;               // willingness_to_pay-adjusted score (the rank key)
+  int32 rank = 6;                   // 1-based position in this router's ranking
+  // reserved 7 to 9;  // response / actual_cost / called (real-call mode, later)
+}
+
+// One router's verdict for the prompt: its top pick plus the full ranking.
+message RouterDecision {
+  string router_type = 1;           // "knn" | "mlp" | "svm"
+  string best_model = 2;            // raw model id of the top-ranked candidate
+  string best_model_display = 3;    // human label of the top pick
+  repeated ModelScore ranking = 4;  // every candidate, ordered best-first
+  // Free-form note for caveats (e.g. a router that could not score this prompt).
+  string note = 5;
+}
+
+message RouteTaskResponse {
+  // Echo the request so a client can render without retaining local state.
+  string prompt = 1;
+  double willingness_to_pay = 2;
+  repeated RouterDecision decisions = 3;
 }

@@ -28,6 +28,10 @@ class AppState:
         self.collection: Optional[EvaluationResultCollection] = None
         # LLM model names that participate in routing (excludes router types).
         self.models_to_route: list[str] = []
+        # Fitted routers for live single-prompt routing (RouteTask), keyed by
+        # router_type. Empty when the latest run predates router persistence or
+        # when MongoDB is unset — RouteTask then reports nothing is available.
+        self.routers: dict = {}
 
     def load(self) -> None:
         """Load results from MongoDB (latest run for DATA_NAME), then derive the
@@ -70,3 +74,31 @@ class AppState:
                 if name not in router_types:
                     models.add(name)
         self.models_to_route = list(models)
+
+        # Live routing (RouteTask): load the fitted routers for this run and give
+        # each one a live embedding cache (stripped at save time). Optional — a
+        # missing artifact just leaves RouteTask with nothing to serve, while the
+        # three read-only result RPCs keep working.
+        self._load_routers()
+
+    def _load_routers(self) -> None:
+        self.routers = {}
+        if not CONNECTION_STRING:
+            return
+        try:
+            from embedding.cache import EmbeddingCache
+            from routers.router_store import RouterStore
+
+            routers, _ = RouterStore(CONNECTION_STRING).load_latest_routers(DATA_NAME)
+            if routers:
+                cache = EmbeddingCache(CONNECTION_STRING)
+                for router in routers.values():
+                    router.cache = cache
+            self.routers = routers
+            _log.info(
+                "Loaded %d live routers (%s)",
+                len(self.routers),
+                ", ".join(sorted(self.routers)) or "none",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("Could not load live routers: %s", exc)

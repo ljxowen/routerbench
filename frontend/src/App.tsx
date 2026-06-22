@@ -5,9 +5,10 @@ import FilterableTable from "./components/FilterableTable"
 import ComparisonTable from "./components/ComparisonTable"
 import HeatmapTable from "./components/HeatmapTable"
 import PerformanceCostChart from "./components/PerformanceCostChart"
+import RouteExplorer from "./components/RouteExplorer"
 import "./App.css"
 
-type Page = "summary" | "details" | "comparison" | "heatmap" | "chart"
+type Page = "summary" | "details" | "comparison" | "heatmap" | "chart" | "route"
 
 const TABS: { id: Page; label: string }[] = [
   { id: "summary", label: "Summary" },
@@ -15,6 +16,7 @@ const TABS: { id: Page; label: string }[] = [
   { id: "comparison", label: "Comparison" },
   { id: "heatmap", label: "Heatmap" },
   { id: "chart", label: "Chart" },
+  { id: "route", label: "Route a Task" },
 ]
 
 export default function App() {
@@ -58,15 +60,22 @@ export default function App() {
           </button>
         ))}
       </div>
-      {loading && <p style={{ color: "#6b7280" }}>Loading...</p>}
-      {error && <p style={{ color: "red" }}>{error}</p>}
-      {!loading && !error && (
+      {/* Live routing is independent of the precomputed benchmark data, so it
+          renders even while that data loads or if it failed to load. */}
+      {page === "route" && <RouteExplorer />}
+      {page !== "route" && (
         <>
-          {page === "summary" && <SummaryTable rows={rows} />}
-          {page === "details" && <FilterableTable rows={rows} evalNames={evalNames} />}
-          {page === "comparison" && <ComparisonTable rows={rows} evalNames={evalNames} />}
-          {page === "heatmap" && <HeatmapTable rows={rows} />}
-          {page === "chart" && <PerformanceCostChart evalNames={evalNames} />}
+          {loading && <p style={{ color: "#6b7280" }}>Loading...</p>}
+          {error && <p style={{ color: "red" }}>{error}</p>}
+          {!loading && !error && (
+            <>
+              {page === "summary" && <SummaryTable rows={rows} />}
+              {page === "details" && <FilterableTable rows={rows} evalNames={evalNames} />}
+              {page === "comparison" && <ComparisonTable rows={rows} evalNames={evalNames} />}
+              {page === "heatmap" && <HeatmapTable rows={rows} />}
+              {page === "chart" && <PerformanceCostChart evalNames={evalNames} />}
+            </>
+          )}
         </>
       )}
     </div>

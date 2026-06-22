@@ -6,9 +6,10 @@ then add one include_router line here.
 """
 from fastapi import APIRouter
 
-from gateway.routes import chart, evals, results
+from gateway.routes import chart, evals, results, route
 
 api_router = APIRouter()
 api_router.include_router(results.router)  # /api/results
 api_router.include_router(evals.router)    # /api/evals
 api_router.include_router(chart.router)    # /api/chart
+api_router.include_router(route.router)    # /api/route (POST, live routing)

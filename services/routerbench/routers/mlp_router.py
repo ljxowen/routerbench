@@ -7,10 +7,13 @@ from numpy.typing import NDArray
 from sklearn.neural_network import MLPRegressor
 
 from embedding.cache import EmbeddingCache
-from routers.abstract_router import (AbstractRouter, get_completion_token_cost,
-                                     get_model_request_cost,
-                                     get_prompt_token_cost,
-                                     get_tokens_for_response)
+from routers.abstract_router import (
+    AbstractRouter,
+    get_completion_token_cost,
+    get_model_request_cost,
+    get_prompt_token_cost,
+    get_tokens_for_response,
+)
 
 
 class MLPRouter(AbstractRouter):
@@ -106,6 +109,20 @@ class MLPRouter(AbstractRouter):
         # Want idxmax to return the model name, not the performance score
         best_model = pd.DataFrame(performance_scores).idxmax(axis=1)
         return best_model.values
+
+    def predict_performance(self, prompts: list[str]) -> pd.DataFrame:
+        """Per-model predicted performance for each prompt (the ranking vector).
+
+        Returns a DataFrame indexed by prompt position with one column per model,
+        holding each per-model MLP's predicted accuracy. This is the same signal
+        ``batch_route_prompts`` computes before the argmax; exposing it lets the
+        live-routing layer rank every model, not just name the winner. No
+        willingness-to-pay adjustment is applied here (the caller's concern).
+        """
+        prompt_embedding = self.cache.batch_get_embedding(
+            tuple(prompts), self.embedding_model
+        )
+        return pd.DataFrame(self.get_model_to_route_to(prompt_embedding.tolist()))
 
     def get_model_to_route_to(self, input_embedding):
         # Score each model

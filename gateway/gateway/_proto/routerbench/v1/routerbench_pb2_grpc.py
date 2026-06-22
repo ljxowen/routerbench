@@ -32,6 +32,11 @@ class RouterBenchStub(object):
                 request_serializer=routerbench_dot_v1_dot_routerbench__pb2.ChartRequest.SerializeToString,
                 response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ChartResponse.FromString,
                 )
+        self.RouteTask = channel.unary_unary(
+                '/routerbench.v1.RouterBench/RouteTask',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskResponse.FromString,
+                )
 
 
 class RouterBenchServicer(object):
@@ -64,6 +69,19 @@ class RouterBenchServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def RouteTask(self, request, context):
+        """Live single-prompt routing. Given an arbitrary user task (prompt), each
+        available router (knn/mlp/svm) predicts how every candidate LLM would do
+        and returns its pick plus the full ranking. Unlike the three RPCs above —
+        which serve precomputed benchmark *measurements* — this runs the fitted
+        routers in-process against a brand-new prompt, so the numbers are router
+        *predictions* (expected accuracy) and *estimated* cost, not measured values.
+        The routers are loaded at startup from the persisted run (see RouterStore).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RouterBenchServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -81,6 +99,11 @@ def add_RouterBenchServicer_to_server(servicer, server):
                     servicer.GetChartData,
                     request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ChartRequest.FromString,
                     response_serializer=routerbench_dot_v1_dot_routerbench__pb2.ChartResponse.SerializeToString,
+            ),
+            'RouteTask': grpc.unary_unary_rpc_method_handler(
+                    servicer.RouteTask,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -143,5 +166,22 @@ class RouterBench(object):
         return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/GetChartData',
             routerbench_dot_v1_dot_routerbench__pb2.ChartRequest.SerializeToString,
             routerbench_dot_v1_dot_routerbench__pb2.ChartResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def RouteTask(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/RouteTask',
+            routerbench_dot_v1_dot_routerbench__pb2.RouteTaskRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.RouteTaskResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

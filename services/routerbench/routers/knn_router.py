@@ -5,10 +5,13 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from embedding.cache import EmbeddingCache
-from routers.abstract_router import (AbstractRouter, get_completion_token_cost,
-                                     get_model_request_cost,
-                                     get_prompt_token_cost,
-                                     get_tokens_for_response)
+from routers.abstract_router import (
+    AbstractRouter,
+    get_completion_token_cost,
+    get_model_request_cost,
+    get_prompt_token_cost,
+    get_tokens_for_response,
+)
 
 
 class KNNRouter(AbstractRouter):
@@ -91,6 +94,23 @@ class KNNRouter(AbstractRouter):
         models_to_route_to = performance_scores.idxmax(axis=1)
 
         return models_to_route_to.values
+
+    def predict_performance(self, prompts: List[str]) -> pd.DataFrame:
+        """Per-model predicted performance for each prompt (the ranking vector).
+
+        Returns a DataFrame indexed by prompt position with one column per model
+        in ``models_to_route``, holding the router's raw predicted accuracy.
+        This is the same signal ``batch_route_prompts`` computes before taking
+        the argmax; exposing it lets the live-routing layer rank every model
+        instead of only naming the winner. No willingness-to-pay adjustment is
+        applied here — that (and cost estimation) is the caller's concern.
+        """
+        prompt_embeddings = self.cache.batch_get_embedding(
+            tuple(prompts), self.embedding_model
+        )
+        if len(prompt_embeddings.shape) == 1:
+            prompt_embeddings = np.vstack(prompt_embeddings)
+        return self.calc_performance_scores(prompt_embeddings)
 
     def calc_performance_scores(self, prompt_embeddings: np.ndarray) -> pd.DataFrame:
         """

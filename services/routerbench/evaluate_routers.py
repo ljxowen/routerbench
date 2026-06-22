@@ -13,18 +13,22 @@ import tqdm
 from jsonargparse import ActionConfigFile, ArgumentParser
 from tqdm.auto import tqdm as tqdm_auto
 
-from evaluate_utils import (combined_eval_results_to_eval_collection,
-                            generate_knn_routers, generate_mlp_routers,
-                            generate_svm_routers, parse_params_from_model_name,
-                            save_results, update_df_to_gcs, update_file_to_gcs)
+from evaluate_utils import (
+    combined_eval_results_to_eval_collection,
+    generate_knn_routers,
+    generate_mlp_routers,
+    generate_svm_routers,
+    parse_params_from_model_name,
+    save_results,
+    update_df_to_gcs,
+    update_file_to_gcs,
+)
 
 tqdm_auto.pandas()
 
 from embedding.cache import EmbeddingCache
-from routers.run_cascading_router import \
-    run_cascading_router_for_eval_dataframe
-from utils import (WILLINGNESS_TO_PAY, build_train_eval_dataset,
-                   get_models_to_route)
+from routers.run_cascading_router import run_cascading_router_for_eval_dataframe
+from utils import WILLINGNESS_TO_PAY, build_train_eval_dataset, get_models_to_route
 
 warnings.simplefilter("ignore")
 dotenv.load_dotenv()
@@ -354,6 +358,9 @@ if __name__ == "__main__":
     import time
 
     output_filenames = []
+    # One fitted router per type, kept for live single-prompt routing and
+    # persisted after the loop (local runs only). First occurrence per type wins.
+    live_routers: dict = {}
     t = time.time()
     if args.wanted_eval_name is not None:
         if isinstance(args.wanted_eval_name, list):
@@ -442,6 +449,11 @@ if __name__ == "__main__":
                 fraction,
                 MODELS_TO_ROUTE,
             )
+            # Stash one fitted router per type for live routing.
+            for _router, _name in model_routers_and_names:
+                _rtype = _name.split("|")[0]
+                if _rtype not in live_routers:
+                    live_routers[_rtype] = _router
         else:
             knn_param_combinations = [
                 (
@@ -540,11 +552,30 @@ if __name__ == "__main__":
                 models_to_route=MODELS_TO_ROUTE,
             )
         )
+    data_name = args.data_name if args.data_name else args.wanted_eval_name
     # Combine output results into a single file
     combined_eval_results_to_eval_collection(
         output_filenames,
         models_to_route=MODELS_TO_ROUTE,
-        data_name=args.data_name if args.data_name else args.wanted_eval_names,
+        data_name=data_name,
         connection_string=args.cache_url,
         local_mode=args.local_cache,
     )
+
+    # Persist the fitted routers so the service can route live single prompts.
+    # Local runs only: the Modal path trains routers remotely and never hands the
+    # objects back, and a purely local cache (--local-cache) means no MongoDB.
+    # Failures here do not abort the run (the benchmark results are already saved).
+    if args.local and not args.local_cache and live_routers:
+        try:
+            from routers.router_store import RouterStore
+
+            run_id = RouterStore(args.cache_url).save_routers(
+                data_name=data_name,
+                routers=live_routers,
+                models_to_route=MODELS_TO_ROUTE,
+                embedding_model=embedding_models[0] if embedding_models else None,
+            )
+            print(f"Saved fitted routers to MongoDB (run_id={run_id})")
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING: failed to persist fitted routers: {exc}")

@@ -4,29 +4,20 @@ train_fraction: 0.7
 willingness_to_pay: true
 local: true
 wanted_eval_name:
-- grade-school-math
-- hellaswag
-- mmlu
-- arc-challenge
 - mbpp
-- winogrande
-- mtbench
 out_of_distribution: false
-gcp_token: <path to GCP token>
+gcp_token: gcs_credentials.json
 gcp_bucket: model-saving-bucket
 data_name: routerbench
 embedding_models:
 - all-MiniLM-L12-v2
 knn:
   neighbors:
-  - 5
   - 10
-  - 40
   metrics:
   - cosine
 mlp:
   hidden_layer_sizes:
-  - 100
   - - 100
     - 100
   activation:
@@ -36,23 +27,9 @@ mlp:
 cascading_router:
   error_rates:
   - 0.0
-  - 0.01
-  - 0.05
-  - 0.1
   - 0.2
-  - 0.4
-  - 0.6
-  - 0.8
   max_cost_per_response_list:
-  - 0.001
-  - 0.005
   - 0.01
-  - 0.05
   - 0.1
-  - 0.5
   - 1.0
-  - 5.0
-  - 10.0
-  - 50.0
-  - 100.0
 local_cache: false

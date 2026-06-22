@@ -13,10 +13,13 @@ Each method has the signature `(self, request, context)`:
 The servicer owns its data via grpc_api.state.AppState (loaded in server.py),
 keeping the microservice independent of the gateway.
 """
+import grpc
+
 from data_result import get_table_data
-from grpc_api.state import AppState
 from grpc_api._proto.routerbench.v1 import routerbench_pb2 as pb
 from grpc_api._proto.routerbench.v1 import routerbench_pb2_grpc as pb_grpc
+from grpc_api.state import AppState
+from live_routing import route_task
 
 
 class RouterBenchServicer(pb_grpc.RouterBenchServicer):
@@ -53,6 +56,33 @@ class RouterBenchServicer(pb_grpc.RouterBenchServicer):
         )
         return _to_proto_chart(data)
 
+    def RouteTask(self, request, context):
+        # Live single-prompt routing. Needs the fitted routers loaded at startup;
+        # if the current run has none, fail cleanly so the gateway returns a 4xx
+        # rather than an opaque error.
+        if not self.state.routers:
+            context.abort(
+                grpc.StatusCode.FAILED_PRECONDITION,
+                "No live routers loaded. Re-run the evaluation pipeline (local "
+                "mode) to persist fitted routers for this data_name.",
+            )
+        prompt = request.prompt or ""
+        if not prompt.strip():
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "prompt is empty")
+        # Empty repeated field -> None means "all loaded routers".
+        router_types = list(request.router_types) or None
+        decisions = route_task(
+            self.state.routers,
+            prompt=prompt,
+            willingness_to_pay=request.willingness_to_pay,
+            router_types=router_types,
+        )
+        return pb.RouteTaskResponse(
+            prompt=prompt,
+            willingness_to_pay=request.willingness_to_pay,
+            decisions=[_to_proto_decision(d) for d in decisions],
+        )
+
 
 def _to_proto_row(row: dict) -> pb.Row:
     """Convert one dict row from data_result into a protobuf Row message.
@@ -75,6 +105,27 @@ def _to_proto_row(row: dict) -> pb.Row:
         # requires string values, so stringify each hyperparameter value
         # (they're a mix of strings and numbers in the source data).
         params={k: str(v) for k, v in row.get("params", {}).items()},
+    )
+
+
+def _to_proto_decision(decision: dict) -> pb.RouterDecision:
+    """Convert one live-routing decision dict into a RouterDecision message."""
+    return pb.RouterDecision(
+        router_type=decision["router_type"],
+        best_model=decision["best_model"],
+        best_model_display=decision["best_model_display"],
+        ranking=[
+            pb.ModelScore(
+                model_name=s["model_name"],
+                display_name=s["display_name"],
+                predicted_performance=float(s["predicted_performance"]),
+                estimated_cost=float(s["estimated_cost"]),
+                utility=float(s["utility"]),
+                rank=int(s["rank"]),
+            )
+            for s in decision["ranking"]
+        ],
+        note=decision.get("note", ""),
     )
 
 

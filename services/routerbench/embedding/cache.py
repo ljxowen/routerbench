@@ -14,6 +14,18 @@ from tqdm import tqdm
 _log = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=4)
+def _load_sentence_transformer(embedding_model: str):
+    """Load (and memoize) a SentenceTransformer by name.
+
+    Loading the model is expensive (weights off disk), so a previous version that
+    reloaded it on every ``encode`` call added seconds of latency to each request.
+    Live single-prompt routing calls this per request, so cache the loaded model
+    per embedding name; the batch pipeline benefits too.
+    """
+    return sentence_transformers.SentenceTransformer(embedding_model)
+
+
 def save_cache_to_disk(results, path: str) -> None:
     with fsspec.open(path, "wb") as f:
         # save results as pickle
@@ -239,5 +251,5 @@ class EmbeddingCache:
     def _compute_sentence_transformers_embedding(
         prompts: list[str], embedding_model: str
     ) -> list[float]:
-        model = sentence_transformers.SentenceTransformer(embedding_model)
+        model = _load_sentence_transformer(embedding_model)
         return model.encode(prompts).tolist()
