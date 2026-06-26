@@ -6,9 +6,17 @@ import ComparisonTable from "./components/ComparisonTable"
 import HeatmapTable from "./components/HeatmapTable"
 import PerformanceCostChart from "./components/PerformanceCostChart"
 import RouteExplorer from "./components/RouteExplorer"
+import TuneRouter from "./components/TuneRouter"
 import "./App.css"
 
-type Page = "summary" | "details" | "comparison" | "heatmap" | "chart" | "route"
+type Page =
+  | "summary"
+  | "details"
+  | "comparison"
+  | "heatmap"
+  | "chart"
+  | "route"
+  | "tune"
 
 const TABS: { id: Page; label: string }[] = [
   { id: "summary", label: "Summary" },
@@ -17,6 +25,7 @@ const TABS: { id: Page; label: string }[] = [
   { id: "heatmap", label: "Heatmap" },
   { id: "chart", label: "Chart" },
   { id: "route", label: "Route a Task" },
+  { id: "tune", label: "Tune Router" },
 ]
 
 export default function App() {
@@ -60,10 +69,11 @@ export default function App() {
           </button>
         ))}
       </div>
-      {/* Live routing is independent of the precomputed benchmark data, so it
-          renders even while that data loads or if it failed to load. */}
+      {/* Live routing and tuning are independent of the precomputed benchmark
+          data, so they render even while that data loads or if it failed. */}
       {page === "route" && <RouteExplorer />}
-      {page !== "route" && (
+      {page === "tune" && <TuneRouter />}
+      {page !== "route" && page !== "tune" && (
         <>
           {loading && <p style={{ color: "#6b7280" }}>Loading...</p>}
           {error && <p style={{ color: "red" }}>{error}</p>}

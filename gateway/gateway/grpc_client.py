@@ -22,7 +22,12 @@ class GrpcClient:
     def connect(self) -> None:
         # insecure_channel is lazy: it doesn't block waiting for the service,
         # the actual connection happens on the first RPC call.
-        channel = grpc.insecure_channel(GRPC_TARGET)
+        channel = grpc.insecure_channel(
+            GRPC_TARGET,
+            # TuneRouter forwards an uploaded training CSV in one message; raise
+            # the send limit past the 4 MB default to match the service.
+            options=[("grpc.max_send_message_length", 32 * 1024 * 1024)],
+        )
         # Wrap the channel so every RPC made through the stub is measured for
         # Prometheus (started/handled counts + latency histogram).
         self._channel = grpc.intercept_channel(channel, ClientMetricsInterceptor())

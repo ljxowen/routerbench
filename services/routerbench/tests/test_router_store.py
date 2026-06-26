@@ -57,3 +57,27 @@ def test_no_run_returns_empty():
     store = RouterStore("server.example.com")
     loaded, models = store.load_latest_routers("does-not-exist")
     assert loaded == {} and models == []
+
+
+@mongomock.patch(servers=(("server.example.com", 27017),))
+def test_list_router_sets_one_entry_per_name_latest():
+    store = RouterStore("server.example.com")
+    store.save_routers(
+        "routerbench",
+        {"knn": _FakeRouter("k")},
+        ["gpt-4", "gpt-3.5"],
+        run_id="20200101T000000Z",
+    )
+    # A newer run for the same name must collapse to a single listed set.
+    store.save_routers(
+        "routerbench", {"knn": _FakeRouter("k"), "mlp": _FakeRouter("m")}, ["gpt-4"]
+    )
+    store.save_routers("support-tickets", {"svm": _FakeRouter("s")}, ["gpt-4"])
+
+    sets = store.list_router_sets()
+    by_name = {s["name"]: s for s in sets}
+    assert set(by_name) == {"routerbench", "support-tickets"}
+    # The latest routerbench run (knn+mlp, 1 model) wins.
+    assert sorted(by_name["routerbench"]["router_types"]) == ["knn", "mlp"]
+    assert by_name["routerbench"]["model_count"] == 1
+    assert by_name["support-tickets"]["router_types"] == ["svm"]

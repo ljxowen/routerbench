@@ -1,4 +1,4 @@
-"""Tests for live single-prompt routing (live_routing.route_task).
+"""Tests for live single-prompt routing (routing.live.route_task).
 
 These use a lightweight fake router so the logic (ranking, willingness-to-pay
 adjustment, cost estimation, router selection) is exercised without embeddings or
@@ -6,7 +6,8 @@ fitted sklearn models.
 """
 import pandas as pd
 
-from live_routing import estimate_cost, route_task
+from routers.pricing import estimate_cost
+from routing.live import route_task
 
 
 class FakeRouter:

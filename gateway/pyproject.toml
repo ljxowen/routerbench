@@ -17,6 +17,8 @@ dependencies = [
     "grpcio>=1.62.3",
     "prometheus-client>=0.20.0",
     "protobuf>=4.25.0,<5",
+    # Required by FastAPI to parse multipart/form-data uploads (POST /api/tune).
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

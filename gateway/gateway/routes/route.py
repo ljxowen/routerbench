@@ -18,6 +18,24 @@ from gateway._proto.routerbench.v1 import routerbench_pb2 as pb
 router = APIRouter(prefix="/api", tags=["route"])
 
 
+@router.get("/router-sets")
+def list_router_sets(stub=Depends(get_stub)):
+    """Available router sets to route with (the default + any tuned sets)."""
+    resp = stub.ListRouterSets(pb.ListRouterSetsRequest())
+    return {
+        "sets": [
+            {
+                "name": s.name,
+                "is_default": s.is_default,
+                "router_types": list(s.router_types),
+                "model_count": s.model_count,
+                "created_at": s.created_at,
+            }
+            for s in resp.sets
+        ]
+    }
+
+
 class RouteRequest(BaseModel):
     # The user's task to route.
     prompt: str
@@ -25,6 +43,9 @@ class RouteRequest(BaseModel):
     willingness_to_pay: float = 0.0
     # Restrict to specific routers; omit/empty for all loaded routers.
     router_types: Optional[List[str]] = None
+    # Which router set to use: omit/empty for the default global set; otherwise a
+    # tuned set's dataset_name (see /api/tune).
+    router_set: Optional[str] = None
 
 
 @router.post("/route")
@@ -35,6 +56,7 @@ def route_task(body: RouteRequest, stub=Depends(get_stub)):
                 prompt=body.prompt,
                 willingness_to_pay=body.willingness_to_pay,
                 router_types=body.router_types or [],
+                router_set=body.router_set or "",
             )
         )
     except grpc.RpcError as exc:

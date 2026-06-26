@@ -37,6 +37,26 @@ class RouterBenchStub(object):
                 request_serializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskRequest.SerializeToString,
                 response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskResponse.FromString,
                 )
+        self.TuneRouter = channel.unary_unary(
+                '/routerbench.v1.RouterBench/TuneRouter',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.TuneRouterRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.TuneRouterResponse.FromString,
+                )
+        self.GetTuningStatus = channel.unary_unary(
+                '/routerbench.v1.RouterBench/GetTuningStatus',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.TuningStatusRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.TuningStatusResponse.FromString,
+                )
+        self.ListRouterSets = channel.unary_unary(
+                '/routerbench.v1.RouterBench/ListRouterSets',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.ListRouterSetsRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ListRouterSetsResponse.FromString,
+                )
+        self.GetTuningSchema = channel.unary_unary(
+                '/routerbench.v1.RouterBench/GetTuningSchema',
+                request_serializer=routerbench_dot_v1_dot_routerbench__pb2.GetTuningSchemaRequest.SerializeToString,
+                response_deserializer=routerbench_dot_v1_dot_routerbench__pb2.GetTuningSchemaResponse.FromString,
+                )
 
 
 class RouterBenchServicer(object):
@@ -82,6 +102,41 @@ class RouterBenchServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def TuneRouter(self, request, context):
+        """Fit a fresh router set from caller-supplied training data, so routing can be
+        tailored to the caller's own task distribution. The heavy work (embedding +
+        fitting) runs in a background worker; this returns immediately with a job_id.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetTuningStatus(self, request, context):
+        """Poll a tuning job started by TuneRouter: status, any error, and — once it
+        succeeds — the held-out quality report and the persisted run_id.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ListRouterSets(self, request, context):
+        """List the router sets available to route with: the default global set plus
+        any user-tuned sets, so a client can offer them as a choice for RouteTask's
+        router_set.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetTuningSchema(self, request, context):
+        """Describe the upload contract for TuneRouter (mode "labeled"): the valid model
+        column headers and the minimum-size rules, so a UI can show the exact format
+        and generate a template without hardcoding (and drifting from) the server.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_RouterBenchServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -104,6 +159,26 @@ def add_RouterBenchServicer_to_server(servicer, server):
                     servicer.RouteTask,
                     request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskRequest.FromString,
                     response_serializer=routerbench_dot_v1_dot_routerbench__pb2.RouteTaskResponse.SerializeToString,
+            ),
+            'TuneRouter': grpc.unary_unary_rpc_method_handler(
+                    servicer.TuneRouter,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.TuneRouterRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.TuneRouterResponse.SerializeToString,
+            ),
+            'GetTuningStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTuningStatus,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.TuningStatusRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.TuningStatusResponse.SerializeToString,
+            ),
+            'ListRouterSets': grpc.unary_unary_rpc_method_handler(
+                    servicer.ListRouterSets,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.ListRouterSetsRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.ListRouterSetsResponse.SerializeToString,
+            ),
+            'GetTuningSchema': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetTuningSchema,
+                    request_deserializer=routerbench_dot_v1_dot_routerbench__pb2.GetTuningSchemaRequest.FromString,
+                    response_serializer=routerbench_dot_v1_dot_routerbench__pb2.GetTuningSchemaResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -183,5 +258,73 @@ class RouterBench(object):
         return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/RouteTask',
             routerbench_dot_v1_dot_routerbench__pb2.RouteTaskRequest.SerializeToString,
             routerbench_dot_v1_dot_routerbench__pb2.RouteTaskResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def TuneRouter(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/TuneRouter',
+            routerbench_dot_v1_dot_routerbench__pb2.TuneRouterRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.TuneRouterResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetTuningStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/GetTuningStatus',
+            routerbench_dot_v1_dot_routerbench__pb2.TuningStatusRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.TuningStatusResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def ListRouterSets(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/ListRouterSets',
+            routerbench_dot_v1_dot_routerbench__pb2.ListRouterSetsRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.ListRouterSetsResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def GetTuningSchema(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/routerbench.v1.RouterBench/GetTuningSchema',
+            routerbench_dot_v1_dot_routerbench__pb2.GetTuningSchemaRequest.SerializeToString,
+            routerbench_dot_v1_dot_routerbench__pb2.GetTuningSchemaResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)

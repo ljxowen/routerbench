@@ -32,6 +32,10 @@ class AppState:
         # router_type. Empty when the latest run predates router persistence or
         # when MongoDB is unset — RouteTask then reports nothing is available.
         self.routers: dict = {}
+        # Lazy, multi-tenant cache of router sets (default + user-tuned sets).
+        # Seeded with the default at load(); RouteTask reads through it so a
+        # tuned set is pulled in on first use. None until load() runs.
+        self.router_sets = None
 
     def load(self) -> None:
         """Load results from MongoDB (latest run for DATA_NAME), then derive the
@@ -82,18 +86,17 @@ class AppState:
         self._load_routers()
 
     def _load_routers(self) -> None:
+        from routing.router_set_cache import RouterSetCache
+
         self.routers = {}
+        self.router_sets = RouterSetCache(CONNECTION_STRING, DATA_NAME)
         if not CONNECTION_STRING:
             return
         try:
-            from embedding.cache import EmbeddingCache
-            from routers.router_store import RouterStore
-
-            routers, _ = RouterStore(CONNECTION_STRING).load_latest_routers(DATA_NAME)
-            if routers:
-                cache = EmbeddingCache(CONNECTION_STRING)
-                for router in routers.values():
-                    router.cache = cache
+            # Load the default set through the cache so there is a single loading
+            # path (it also attaches the shared embedding cache). Tuned sets are
+            # pulled in lazily on first RouteTask that names them.
+            routers, _ = self.router_sets.get(DATA_NAME)
             self.routers = routers
             _log.info(
                 "Loaded %d live routers (%s)",

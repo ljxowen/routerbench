@@ -101,6 +101,7 @@ export async function routeTask(
   prompt: string,
   willingnessToPay: number,
   routerTypes?: string[],
+  routerSet?: string,
 ): Promise<RouteResponse> {
   const res = await fetch("/api/route", {
     method: "POST",
@@ -109,6 +110,8 @@ export async function routeTask(
       prompt,
       willingness_to_pay: willingnessToPay,
       router_types: routerTypes ?? null,
+      // Empty/undefined selects the default global router set.
+      router_set: routerSet || null,
     }),
   })
   if (!res.ok) {
@@ -122,5 +125,96 @@ export async function routeTask(
     }
     throw new Error(detail)
   }
+  return res.json()
+}
+
+// ---- Router sets (/api/router-sets) ----
+
+export type RouterSet = {
+  name: string // pass as router_set to routeTask
+  is_default: boolean
+  router_types: string[]
+  model_count: number
+  created_at: string
+}
+
+export async function fetchRouterSets(): Promise<RouterSet[]> {
+  const res = await fetch("/api/router-sets")
+  if (!res.ok) throw new Error("Failed to fetch router sets")
+  const data = await res.json()
+  return data.sets
+}
+
+// ---- Tuning upload schema (/api/tuning-schema) ----
+
+export type TuningSchema = {
+  recognized_models: string[] // the only valid model column headers
+  min_rows: number
+  min_labels_per_model: number
+  min_models: number
+}
+
+export async function fetchTuningSchema(): Promise<TuningSchema> {
+  const res = await fetch("/api/tuning-schema")
+  if (!res.ok) throw new Error("Failed to fetch tuning schema")
+  return res.json()
+}
+
+// ---- Router tuning (/api/tune) ----
+
+// Tuning fits a fresh router set from the user's own labeled data so routing can
+// match their task distribution. The fit runs async in the background; the UI
+// kicks it off, then polls getTuningStatus until it succeeds or fails.
+
+export type RouterQuality = {
+  router_type: string
+  routed_accuracy: number // accuracy of the model this router picks (held-out)
+  routed_cost: number // total estimated USD over the held-out split
+}
+
+export type TuningMetrics = {
+  train_rows: number
+  eval_rows: number
+  best_single_accuracy: number // best fixed model on the held-out split
+  best_single_model: string
+  oracle_accuracy: number // upper bound (always pick a correct model)
+  routers: RouterQuality[]
+}
+
+export type TuningStatus = {
+  job_id: string
+  dataset_name: string
+  status: "pending" | "running" | "succeeded" | "failed" | string
+  error: string
+  run_id: string
+  router_types: string[]
+  metrics: TuningMetrics | null
+}
+
+export async function startTuning(
+  file: File,
+  datasetName: string,
+  routerTypes: string[],
+): Promise<{ job_id: string; dataset_name: string; status: string }> {
+  const form = new FormData()
+  form.append("file", file)
+  form.append("dataset_name", datasetName)
+  form.append("router_types", routerTypes.join(","))
+  const res = await fetch("/api/tune", { method: "POST", body: form })
+  if (!res.ok) {
+    let detail = "Failed to start tuning"
+    try {
+      detail = (await res.json()).detail ?? detail
+    } catch {
+      /* non-JSON error body */
+    }
+    throw new Error(detail)
+  }
+  return res.json()
+}
+
+export async function getTuningStatus(jobId: string): Promise<TuningStatus> {
+  const res = await fetch(`/api/tune/${encodeURIComponent(jobId)}`)
+  if (!res.ok) throw new Error("Failed to fetch tuning status")
   return res.json()
 }

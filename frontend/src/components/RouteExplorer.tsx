@@ -1,8 +1,10 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
   RouteResponse,
   RouterDecision,
   ModelScore,
+  RouterSet,
+  fetchRouterSets,
   routeTask,
 } from "../api/client"
 
@@ -113,16 +115,28 @@ function DecisionCard({ decision }: { decision: RouterDecision }) {
 export default function RouteExplorer() {
   const [prompt, setPrompt] = useState("")
   const [wtp, setWtp] = useState(0)
+  // Empty = the default global router set; a name routes with a tuned set (see
+  // the Tune Router tab).
+  const [routerSet, setRouterSet] = useState("")
+  const [routerSets, setRouterSets] = useState<RouterSet[]>([])
   const [result, setResult] = useState<RouteResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Load the selectable router sets once (default + any tuned sets). Switching
+  // back to this tab remounts the component, so a freshly tuned set shows up.
+  useEffect(() => {
+    fetchRouterSets()
+      .then(setRouterSets)
+      .catch(() => setRouterSets([]))
+  }, [])
 
   async function onSubmit() {
     if (!prompt.trim()) return
     setLoading(true)
     setError(null)
     try {
-      setResult(await routeTask(prompt, wtp))
+      setResult(await routeTask(prompt, wtp, undefined, routerSet))
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to route prompt")
       setResult(null)
@@ -179,6 +193,24 @@ export default function RouteExplorer() {
             ))}
           </select>{" "}
           <span style={{ color: "#9ca3af" }}>(wtp={fmtWtp(wtp)})</span>
+        </label>
+        <label style={{ fontSize: 13, color: "#374151" }}>
+          Router set:{" "}
+          <select
+            value={routerSet}
+            onChange={(e) => setRouterSet(e.target.value)}
+            style={{ padding: "4px 8px", fontSize: 13 }}
+          >
+            {/* Default global set, plus any tuned sets (non-default ones). */}
+            <option value="">default</option>
+            {routerSets
+              .filter((s) => !s.is_default)
+              .map((s) => (
+                <option key={s.name} value={s.name}>
+                  {s.name} ({s.router_types.join("/")})
+                </option>
+              ))}
+          </select>
         </label>
         <button
           onClick={onSubmit}

@@ -20,14 +20,10 @@ import grpc
 from grpc_health.v1 import health, health_pb2, health_pb2_grpc
 from prometheus_client import start_http_server
 
+from grpc_api import config
 from grpc_api._proto.routerbench.v1 import routerbench_pb2 as pb
 from grpc_api._proto.routerbench.v1 import routerbench_pb2_grpc as pb_grpc
-from grpc_api import config
-from grpc_api.observability import (
-    LoggingInterceptor,
-    MetricsInterceptor,
-    setup_tracing,
-)
+from grpc_api.observability import LoggingInterceptor, MetricsInterceptor, setup_tracing
 from grpc_api.service import RouterBenchServicer
 from grpc_api.state import AppState
 
@@ -57,6 +53,11 @@ def serve() -> None:
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=config.MAX_WORKERS),
         interceptors=[MetricsInterceptor(), LoggingInterceptor()],
+        # Raise the inbound limit so a TuneRouter upload (a training CSV) fits in
+        # one message; the rest of the RPCs are tiny.
+        options=[
+            ("grpc.max_receive_message_length", config.MAX_RECV_MESSAGE_BYTES),
+        ],
     )
 
     # Register the business service. The generated helper wires every RPC

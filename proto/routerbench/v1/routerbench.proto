@@ -45,6 +45,25 @@ service RouterBench {
   // *predictions* (expected accuracy) and *estimated* cost, not measured values.
   // The routers are loaded at startup from the persisted run (see RouterStore).
   rpc RouteTask(RouteTaskRequest) returns (RouteTaskResponse);
+
+  // Fit a fresh router set from caller-supplied training data, so routing can be
+  // tailored to the caller's own task distribution. The heavy work (embedding +
+  // fitting) runs in a background worker; this returns immediately with a job_id.
+  rpc TuneRouter(TuneRouterRequest) returns (TuneRouterResponse);
+
+  // Poll a tuning job started by TuneRouter: status, any error, and — once it
+  // succeeds — the held-out quality report and the persisted run_id.
+  rpc GetTuningStatus(TuningStatusRequest) returns (TuningStatusResponse);
+
+  // List the router sets available to route with: the default global set plus
+  // any user-tuned sets, so a client can offer them as a choice for RouteTask's
+  // router_set.
+  rpc ListRouterSets(ListRouterSetsRequest) returns (ListRouterSetsResponse);
+
+  // Describe the upload contract for TuneRouter (mode "labeled"): the valid model
+  // column headers and the minimum-size rules, so a UI can show the exact format
+  // and generate a template without hardcoding (and drifting from) the server.
+  rpc GetTuningSchema(GetTuningSchemaRequest) returns (GetTuningSchemaResponse);
 }
 
 // Empty request: a placeholder type so GetEvalNames has a well-defined signature
@@ -139,6 +158,10 @@ message RouteTaskRequest {
   // Restrict to specific routers (e.g. ["knn", "mlp"]); empty means all that
   // the service has loaded.
   repeated string router_types = 3;
+  // Which router set to route with: empty selects the default global set (the
+  // latest benchmark run); otherwise the dataset_name of a tuned set produced by
+  // TuneRouter. The service lazy-loads and caches the set on first use.
+  string router_set = 4;
 }
 
 // One candidate LLM as scored by a router for this prompt. predicted_performance
@@ -170,4 +193,94 @@ message RouteTaskResponse {
   string prompt = 1;
   double willingness_to_pay = 2;
   repeated RouterDecision decisions = 3;
+}
+
+// ---- Router tuning (TuneRouter / GetTuningStatus) ----
+
+message TuneRouterRequest {
+  // Raw uploaded training data (CSV bytes). For mode "labeled" the schema is the
+  // RouterBench wide format: a `prompt` column plus one 0/1 correctness column
+  // per candidate model (optionally `{model}|model_response`, `eval_name`).
+  bytes data = 1;
+  // Names the resulting router set; RouteTask selects it via `router_set`.
+  // Reusing a name creates a newer run that supersedes the previous one.
+  string dataset_name = 2;
+  // Router types to fit; empty means all live-routable types (knn/mlp/svm).
+  repeated string router_types = 3;
+  // Label source. "labeled" (default): the data already carries per-model
+  // correctness. "graded" (NOT yet implemented): the data carries ground-truth
+  // answers and the service runs + grades each model to produce the labels.
+  string mode = 4;
+}
+
+message TuneRouterResponse {
+  string job_id = 1;
+  string dataset_name = 2;
+  string status = 3;  // initial status, typically "pending"
+}
+
+message TuningStatusRequest {
+  string job_id = 1;
+}
+
+// Held-out quality of one fitted router: how the model it picks scores on the
+// evaluation split, so the user can compare against the baselines below.
+message RouterQuality {
+  string router_type = 1;
+  double routed_accuracy = 2;  // mean correctness of the picked model on the split
+  double routed_cost = 3;      // total estimated USD over the split
+}
+
+// The quality report for a finished tuning job. routed accuracy sits between the
+// best single fixed model (lower-ish reference) and the oracle (upper bound), so
+// the user can see whether routing on their data actually helps.
+message TuningMetrics {
+  int32 train_rows = 1;
+  int32 eval_rows = 2;
+  double best_single_accuracy = 3;  // best fixed model on the held-out split
+  string best_single_model = 4;
+  double oracle_accuracy = 5;       // always-pick-a-correct-model upper bound
+  repeated RouterQuality routers = 6;
+}
+
+message TuningStatusResponse {
+  string job_id = 1;
+  string dataset_name = 2;
+  string status = 3;          // pending | running | succeeded | failed
+  string error = 4;           // populated when status == failed
+  string run_id = 5;          // the persisted router run id, when succeeded
+  TuningMetrics metrics = 6;  // populated when status == succeeded
+  repeated string router_types = 7;
+}
+
+// ---- Router set listing (ListRouterSets) ----
+
+message ListRouterSetsRequest {}
+
+// One selectable router set (a persisted run, keyed by name). The default set is
+// the global benchmark run; the rest are user-tuned sets from TuneRouter.
+message RouterSet {
+  string name = 1;                  // the router_set value to pass to RouteTask
+  bool is_default = 2;              // true for the global benchmark set
+  repeated string router_types = 3; // which router types it carries
+  int32 model_count = 4;            // number of candidate models it routes among
+  string created_at = 5;            // ISO-8601 time of its latest run
+}
+
+message ListRouterSetsResponse {
+  repeated RouterSet sets = 1;
+}
+
+// ---- Tuning upload schema (GetTuningSchema) ----
+
+message GetTuningSchemaRequest {}
+
+// The labeled-upload contract, so a client can render the exact format + a
+// template. recognized_models are the only valid model column headers (they must
+// be priced, so cost estimates work).
+message GetTuningSchemaResponse {
+  repeated string recognized_models = 1;
+  int32 min_rows = 2;
+  int32 min_labels_per_model = 3;
+  int32 min_models = 4;
 }

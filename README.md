@@ -21,6 +21,16 @@ frontend (React)  ──REST/HTTP──►  gateway (FastAPI)  ──gRPC──�
   against breaking changes (`proto/buf.yaml`).
 - **frontend/** — React + Vite UI (dev server proxies `/api` to the gateway).
 
+Beyond browsing the precomputed benchmark (tables/heatmaps/charts), the app has two
+interactive features (see PROJECT_GUIDE.md §5/§5b):
+
+- **Route a Task** (`POST /api/route`) — type a prompt; each fitted router (knn/mlp/svm)
+  predicts how every candidate model would do and returns its pick plus the full ranking
+  (predictions + cost estimates; the LLM is not actually called).
+- **Tune Router** (`POST /api/tune`) — upload your own labeled data to fit a router set
+  tailored to your tasks (async job + held-out quality report), then route with it via
+  `RouteTask`'s `router_set`. Listed by `GET /api/router-sets`.
+
 Both backends are instrumented for production: Prometheus metrics (`/metrics`),
 structured request logging, optional OpenTelemetry tracing, the standard gRPC
 health-checking protocol, and graceful shutdown. See PROJECT_GUIDE.md §6.
@@ -85,7 +95,7 @@ process metrics); the bundled stack scrapes and visualizes them. After
 |------|--------------|
 | http://localhost:3001 | **Grafana** — no login; the pre-provisioned **"RouterBench gRPC"** dashboard (QPS, P95 latency, error ratio, memory), plus **traces** under Explore → Tempo |
 | http://localhost:9091 | Prometheus UI (target health, ad-hoc PromQL) |
-| http://localhost:8081 | **mongo-express** — browse the MongoDB embedding cache + results (`eval_results` / `eval_runs`); basic auth `admin` / `admin` |
+| http://localhost:8081 | **mongo-express** — browse the MongoDB embedding cache, results (`eval_results` / `eval_runs`), fitted routers (`router_runs` + `router_artifacts`) and tuning jobs (`tuning_jobs`); basic auth `admin` / `admin` |
 
 The service connects to MongoDB at `mongodb://mongo:27017` inside compose (exposed on
 the host as `mongodb://localhost:27017` for the offline pipeline and tools like Compass).

@@ -41,6 +41,10 @@ Fourth, run `visualize_results.py --config=configs/visualize.yaml` uses the Eval
 
 The gRPC server loads results from MongoDB at startup (latest run for `ROUTERBENCH_DATA_NAME`, default `routerbench`) when `CONNECTION_STRING` is set, falling back to the bundled `.pkl` (`grpc_api/config.py:PKL_PATH`) when Mongo is unset, unreachable, or has no run yet. It also loads that run's fitted routers (if present) to serve the `RouteTask` RPC / `POST /api/route` (live single-prompt routing). Until a local run has persisted routers for the data_name, `RouteTask` returns `FAILED_PRECONDITION` (HTTP 409) while the read-only result/chart endpoints keep working.
 
+### Tuning a router set from your own data
+
+Beyond serving the precomputed benchmark, the service can fit a router set tailored to **your** task distribution. Upload a labeled CSV (a `prompt` column plus one 0/1 correctness column per candidate model — same shape as the wide-format dataset) via `POST /api/tune` (`TuneRouter`); the upload is validated up front, then a detached worker (`python -m tuning.worker <job_id>`) embeds + fits knn/mlp/svm and persists them under your chosen set name. Poll `GET /api/tune/{job_id}` (`GetTuningStatus`) for the status and a held-out **quality report** (routed accuracy vs. the best single model vs. the oracle). The tuned set is then selectable per request via `RouteTask`'s `router_set` field and listed by `GET /api/router-sets`. Lives in the `tuning/` package (validation, trainer, jobs, worker) with serving-side lazy loading in `routing/router_set_cache.py`. The `mode` field reserves a future `"graded"` path (upload answers, we run + grade the models); only `"labeled"` is implemented today. Requires MongoDB. See the project guide §5b for the full architecture.
+
 For these configurations, the paths to the data files will need to be updated to use your local paths. Example files to recreate results from the paper are available on [Hugging Face](https://huggingface.co/datasets/withmartian/routerbench).
 
 

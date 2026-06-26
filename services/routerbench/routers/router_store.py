@@ -137,3 +137,31 @@ class RouterStore:
                 continue
             routers[router_type] = pickle.loads(grid_out.read())
         return routers, run.get("models_to_route", [])
+
+    def list_router_sets(self) -> list:
+        """Summarize the available router sets: the latest run per ``data_name``.
+
+        Cheap metadata only (no artifacts loaded), for offering a choice of sets
+        without unpickling anything.
+
+        :return: list of dicts with ``name``, ``router_types``, ``model_count``
+            and ``created_at`` (ISO-8601 string), newest set first.
+        """
+        pipeline = [
+            {"$sort": {"created_at": -1, "_id": -1}},
+            {"$group": {"_id": "$data_name", "doc": {"$first": "$$ROOT"}}},
+        ]
+        sets = []
+        for row in self.runs.aggregate(pipeline):
+            doc = row["doc"]
+            created = doc.get("created_at")
+            sets.append(
+                {
+                    "name": doc.get("data_name", ""),
+                    "router_types": list(doc.get("router_types", []) or []),
+                    "model_count": len(doc.get("models_to_route", []) or []),
+                    "created_at": created.isoformat() if created else "",
+                }
+            )
+        sets.sort(key=lambda s: s["created_at"], reverse=True)
+        return sets

@@ -30,6 +30,13 @@ GRPC_PORT = int(os.environ.get("ROUTERBENCH_GRPC_PORT", "50051"))
 # server dispatches each call to a worker thread; this caps concurrency.
 MAX_WORKERS = int(os.environ.get("ROUTERBENCH_GRPC_MAX_WORKERS", "10"))
 
+# Max inbound gRPC message size, in bytes. The library default (4 MB) is too
+# small for TuneRouter, which carries an uploaded training CSV in one message;
+# raise it so a few-MB dataset fits. The gateway sets a matching send limit.
+MAX_RECV_MESSAGE_BYTES = int(
+    os.environ.get("ROUTERBENCH_GRPC_MAX_RECV_BYTES", str(32 * 1024 * 1024))
+)
+
 # Plain HTTP port where Prometheus scrapes metrics (separate from the gRPC port,
 # since Prometheus speaks HTTP/1.1, not gRPC). Exposes /metrics.
 METRICS_PORT = int(os.environ.get("ROUTERBENCH_METRICS_PORT", "9090"))
